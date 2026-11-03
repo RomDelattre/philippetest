@@ -31,6 +31,18 @@ services:
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-philippe.zander@example.local}
       SEED_PLANNER_EMAIL: ${SEED_PLANNER_EMAIL:-olivier@example.local}
+      # Mails sortants (F-50 à F-52) et liens de réponse (F-21)
+      MAIL_BACKEND: ${MAIL_BACKEND:-file}
+      MAIL_FROM: ${MAIL_FROM:-philippe.zander@example.local}
+      MAIL_FILE_DIR: /data/outbox-mails
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-25}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    volumes:
+      - mails:/data/outbox-mails
     depends_on:
       db:
         condition: service_healthy
@@ -48,6 +60,7 @@ services:
 
 volumes:
   pgdata:
+  mails:
 
 secrets:
   extra_ca:

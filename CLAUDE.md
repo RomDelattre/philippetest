@@ -1,6 +1,6 @@
 # Planning ATS – consignes pour l'agent de code
 
-Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.3,
+Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.4,
 original Word dans `docs/`). Chaque exigence a un identifiant (F-xx, R-xx, NF-xx, Q-xx) :
 cite-les dans les commits, les tests et les commentaires quand c'est utile.
 
@@ -87,7 +87,22 @@ Bearer validé par JWKS). L'utilisateur doit exister dans `users` (rôles `admin
   Front : `Buffer.tsx`, `RequestForm.tsx`, `RequestPanel.tsx`, `dnd.ts`.
   Reporté : brouillon de mail à l'attribution (F-20, phase 3), icône « date proche » (R-06, phase 4),
   traitement des changements en attente (phase 6). Les chevauchements ne sont pas encore signalés (phase 4).
-- Prochaine étape : phase 3 (attribution par mail, boîte d'envoi, jetons, réponses : F-20 à F-26, F-50 à F-52).
+- Phase 3 : faite. Brouillons préparés par `app/services/outbox.py` (attribution F-20, déplacement F-07,
+  annulation F-26, confirmation F-23) ; envoi uniquement par `POST /outbox/send` (admin, P2) via
+  `app/mail.py` (`MAIL_BACKEND` = file | smtp | disabled) ; jeton créé à l'envoi, seule l'empreinte est
+  stockée, corps envoyé conservé avec liens masqués (NF-02) ; page publique `app/api/respond.py`
+  (GET affiche, POST enregistre) ; réponses `app/services/responses.py` (lien F-22 ou manuel F-25 via
+  `PATCH /assignments/{id}` `response`) ; modèles `GET/PUT /settings/mail-templates` ; notifications.
+  Front : `outbox/OutboxPage.tsx`, cloche et navigation dans `App.tsx`, actions dans `SidePanel.tsx`.
+  Limite connue : après une division, la 2e moitié d'une proposition en attente n'a pas de lien propre.
+- Prochaine étape : phase 4 (conflits et alertes : F-40 à F-43, F-08, R-05, R-06, dont « lien expiré »).
+
+## Mails et liens de réponse
+
+- `PUBLIC_BASE_URL` : adresse de l'application vue depuis le poste des techniciens.
+- Le chemin `/api/respond/` doit rester joignable **sans** l'authentification d'entreprise du reverse
+  proxy (le jeton fait office de secret) ; tout le reste de `/api/` reste authentifié.
+- Ne jamais stocker un jeton en clair ni l'écrire dans les journaux.
 
 ## Repères front
 

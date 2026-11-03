@@ -2,9 +2,15 @@
 import { useEffect, useState } from "react";
 import type { Assignment, MissionType, RequestSummary, Technician } from "../api";
 import { formatDate, periodDays } from "../dates";
-import { primaryBtn, secondaryBtn } from "./Dialogs";
+import { dangerBtn, primaryBtn, secondaryBtn } from "./Dialogs";
 import { techName } from "./Grid";
 import { ASSIGNMENT_STATUS_LABELS, type Period } from "./layout";
+
+function dateTime(iso: string): string {
+  return new Intl.DateTimeFormat("fr-BE", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Brussels" }).format(
+    new Date(iso),
+  );
+}
 
 const REQUEST_STATUS: Record<RequestSummary["status"], string> = {
   to_assign: "À attribuer",
@@ -23,6 +29,8 @@ export default function SidePanel(props: {
   onSave: (period: Period) => void;
   onClose: () => void;
   onOpenRequest: (requestId: string) => void;
+  onRespond: (answer: "accept" | "refuse") => void;
+  onCancel: () => void;
 }) {
   const { assignment: a, request: r } = props;
   const [form, setForm] = useState<Period>({ technicianId: a.technician_id, start: a.start_date, end: a.end_date });
@@ -73,6 +81,30 @@ export default function SidePanel(props: {
         <button type="button" className={secondaryBtn} onClick={() => props.onOpenRequest(a.request_id)}>
           Ouvrir la fiche de la demande
         </button>
+
+        <section className="space-y-2 rounded border border-slate-200 p-2" aria-label="Réponse du technicien">
+          <h3 className="font-medium">Proposition</h3>
+          <p className="text-xs text-slate-600">
+            {a.status === "draft" && "Brouillon : le mail au technicien attend votre validation."}
+            {a.status === "pending_response" &&
+              `Envoyée${a.proposed_at ? ` le ${dateTime(a.proposed_at)}` : ""}${a.token_expires_at ? ` · lien valable jusqu'au ${dateTime(a.token_expires_at)}` : ""}.`}
+            {a.status === "accepted" && `Acceptée${a.responded_at ? ` le ${dateTime(a.responded_at)}` : ""}.`}
+          </p>
+          {(a.status === "draft" || a.status === "pending_response") && (
+            <div className="flex flex-wrap gap-2">
+              <span className="w-full text-xs text-slate-500">Réponse reçue autrement (téléphone, oral) :</span>
+              <button type="button" className={secondaryBtn} onClick={() => props.onRespond("accept")}>
+                ✓ Accepte
+              </button>
+              <button type="button" className={secondaryBtn} onClick={() => props.onRespond("refuse")}>
+                ✕ Refuse
+              </button>
+            </div>
+          )}
+          <button type="button" className={dangerBtn} onClick={props.onCancel}>
+            {a.status === "draft" ? "Retirer l'affectation" : "Annuler la proposition"}
+          </button>
+        </section>
 
         <form
           className="space-y-2 rounded border border-slate-200 p-2"

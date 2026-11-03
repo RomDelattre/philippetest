@@ -243,12 +243,21 @@ def test_remove_draft_assignment(client: TestClient, mechs: list[Technician], se
     detail = _get(client, req)
     assert detail["status"] == "to_assign"
     assert detail["assignments"][0]["status"] == "cancelled"  # conservé, jamais supprimé
-    # une affectation envoyée ne se retire pas ici (F-26, phase 3)
+    # F-26 : une proposition envoyée s'annule après confirmation, et un mail d'information est préparé
     b = _assign(client, detail, mechs[1], "2026-11-09", "2026-11-11").json()
     row = seeded.get(Assignment, UUID(b["id"]))
     row.status = AssignmentStatus.PENDING_RESPONSE
+    row.response_token_hash = "h" * 64
     seeded.commit()
-    assert client.delete(f"/api/assignments/{b['id']}", params={"version": row.version}).status_code == 422
+    url = f"/api/assignments/{b['id']}"
+    assert client.delete(url, params={"version": row.version}).status_code == 428
+    assert client.delete(url, params={"version": row.version, "confirm": True}).status_code == 204
+    seeded.expire_all()
+    assert seeded.get(Assignment, UUID(b["id"])).response_token_hash is None
+    kinds = [
+        (m["kind"], m["to_email"]) for m in client.get("/api/outbox").json() if m["assignment_id"] == b["id"]
+    ]
+    assert kinds == [("generic", "technicien.b@example.local")]
 
 
 # --------------------------------------------------------------------------- F-15

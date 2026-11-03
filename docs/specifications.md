@@ -1,6 +1,6 @@
 # Cahier des spécifications – Planning ATS et agent de gestion des demandes
 
-Version 0.3 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
+Version 0.4 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
 
 ## 0. Comment utiliser ce document
 
@@ -13,6 +13,8 @@ v0.1 (3 novembre 2026) : première version.
 v0.2 (3 novembre 2026) : une période est désormais toujours exprimée par une date de début et une date de fin (suppression de days_count partout) ; liens de réponse en deux temps (GET affiche, POST enregistre) ; correction des exceptions de P1 ; définition de l'assignment actif ; ajout des tables users, mission_types, absence_proposals et notifications ; conservation temporaire du corps des mails ; précisions sur le déplacement (F-07), l'expiration des jetons (F-21), la fusion et la division (F-15) ; coquilles corrigées.
 
 v0.3 (3 novembre 2026) : décisions de la phase 2. Déposer une vignette dans la période de la demande reprend les dates de la demande (R-03) ; modifier les dates d'une demande ne déplace pas ses affectations (F-14) ; retrait d'une affectation en brouillon ; fusion avec complément des champs vides et lien merged_into_id (F-15) ; champs attachment_url et merged_into_id ; GET /requests?view=buffer\|all.
+
+v0.4 (3 novembre 2026) : décisions de la phase 3. Le jeton est créé à l'envoi du mail et jamais stocké en clair (F-21, NF-02) ; une seule confirmation au demandeur par demande, mise à jour à chaque acceptation (F-23) ; un refus pose le badge « refusée par un technicien » (F-24) ; réponse manuelle possible aussi sur un brouillon (F-25) ; déplacer une proposition envoyée vers un autre technicien prépare un mail d'information à l'ancien (F-07) ; connecteur d'envoi fichier / SMTP (section 4) ; variables de modèles supplémentaires (F-52).
 
 ## 1. Contexte et objectifs
 
@@ -200,17 +202,17 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 - **F-20** Déposer une vignette sur un technicien et des dates crée un assignment draft, calcule les conflits (R-05), puis crée un brouillon de mail dans outbound_messages (tech_proposal) et affiche un message « Mail préparé, à valider ».
 
-- **F-21** Le mail au technicien contient le résumé de la demande et deux liens « J'accepte » et « Je refuse ». Ils portent le même jeton à usage unique, propre à l'assignment, expirant après 14 jours (paramètre) \[Q-07\]. À l'expiration, l'assignment reste pending_response et une alerte orange « lien expiré » apparaît ; Philippe peut préparer un nouveau mail (nouveau jeton) ou saisir la réponse (F-25).
+- **F-21** Le mail au technicien contient le résumé de la demande et deux liens « J'accepte » et « Je refuse ». Ils portent le même jeton à usage unique, propre à l'assignment, expirant après 14 jours (paramètre) \[Q-07\]. Le brouillon garde les variables {lien_accepter} et {lien_refuser} ; le jeton n'est créé qu'au moment de l'envoi, seule son empreinte est stockée, et le corps conservé après envoi remplace les liens par « \[lien J'accepte\] » / « \[lien Je refuse\] » (NF-02). L'envoi passe l'assignment de draft à pending_response. À l'expiration, l'assignment reste pending_response et une alerte orange « lien expiré » apparaît ; Philippe peut préparer un nouveau mail (nouveau jeton) ou saisir la réponse (F-25). Les liens pointent vers PUBLIC_BASE_URL/api/respond/…, chemin qui doit rester accessible sans l'authentification d'entreprise.
 
 - **F-22** Ouvrir un lien (GET) affiche une page interne minimale (aucune authentification, aucune autre information que le résumé) avec un bouton de confirmation de la réponse choisie ; la réponse n'est enregistrée qu'au clic (POST). Ainsi, les analyses automatiques de liens (antivirus de la messagerie, aperçus) ne consomment jamais le jeton. Un jeton déjà utilisé, révoqué ou expiré est rejeté avec un message clair.
 
-- **F-23** Acceptation : l'assignment passe en accepted, un brouillon requester_confirmation est créé pour le demandeur, une notification interne (table \`notifications\`) s'affiche dans l'application.
+- **F-23** Acceptation : l'assignment passe en accepted, un brouillon requester_confirmation est créé pour le demandeur, une notification interne (table notifications) s'affiche dans l'application. Il n'existe qu'un brouillon de confirmation par demande : tant qu'il n'est pas envoyé, il est mis à jour à chaque nouvelle acceptation et liste les techniciens acceptés.
 
-- **F-24** Refus : l'assignment passe en refused, la demande revient dans le tampon avec le nom du technicien refusant en historique, et un voyant informe Philippe.
+- **F-24** Refus : l'assignment passe en refused, la demande revient dans le tampon avec le nom du technicien refusant en historique et le badge « refusée par un technicien » (retiré à la prochaine attribution), et une notification informe Philippe.
 
-- **F-25** Enregistrement manuel de la réponse : un bouton permet à Philippe de marquer un assignment comme accepté ou refusé sans passer par le lien.
+- **F-25** Enregistrement manuel de la réponse : un bouton permet de marquer un assignment comme accepté ou refusé sans passer par le lien, y compris avant l'envoi du mail (le brouillon de proposition est alors retiré). Le lien envoyé devient inutilisable. Limite connue : après une division (F-15), la seconde moitié d'une proposition en attente n'a pas de lien propre ; sa réponse se saisit ici.
 
-- **F-26** Annulation d'une proposition par Philippe : l'assignment est cancelled et un brouillon de mail d'information est proposé.
+- **F-26** Annulation d'une proposition par Philippe : l'assignment est cancelled, le lien envoyé n'est plus valable et un brouillon de mail d'information est préparé pour le technicien. Il en va de même pour l'ancien technicien quand une proposition envoyée est déplacée vers un autre technicien (F-07).
 
 ### 8.4 Absences (F-30 à F-32)
 
@@ -236,7 +238,7 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 - **F-51** Actions : envoyer, envoyer un lot sélectionné, modifier, supprimer. Le statut passe à sent ou failed avec message d'erreur, et un nouvel envoi est possible.
 
-- **F-52** L'expéditeur est Philippe (envoi depuis sa boîte via le connecteur). Les modèles de mails (proposition au technicien, confirmation au demandeur, annulation) sont des gabarits modifiables dans les paramètres, avec variables {demandeur}, {type}, {dates}, {lieu}, {lien_accepter}, {lien_refuser}. Olivier ne voit pas cet écran.
+- **F-52** L'expéditeur est Philippe (envoi depuis sa boîte via le connecteur). Les modèles de mails (proposition au technicien, confirmation au demandeur, annulation) sont des gabarits modifiables, avec les variables {demandeur}, {type}, {dates}, {lieu}, {lien_accepter}, {lien_refuser}, ainsi que {technicien}, {techniciens}, {ref}, {titre}, {client} et {cf}. Le modèle de proposition doit contenir les deux variables de lien. Olivier ne voit pas cet écran. En attendant le connecteur Microsoft \[Q-01\], l'envoi passe par un relais SMTP interne ou, en développement, par des fichiers .eml (MAIL_BACKEND).
 
 ### 8.7 Paramètres, audit, droits (F-70 à F-80)
 
@@ -423,7 +425,7 @@ Chaque phase doit être utilisable et testée avant la suivante. À la fin de ch
 
 Les phases 1 à 4 ne dépendent d'aucune autorisation IT : elles peuvent démarrer immédiatement, pendant que la demande d'accès Microsoft (Q-01, Q-10) est traitée.
 
-**État au 3 novembre 2026** : phases 0, 1 et 2 réalisées (socle ; planning F-01 à F-07 et absences manuelles F-31 ; tampon, vignettes, formulaire, fiche, fusion et division F-10 à F-15, attribution par glisser-déposer R-03). Reporté volontairement : brouillons de mail (F-07 et F-20 → phase 3) ; voyants de conflit F-08 et icône « date proche » R-06 (phase 4) ; application ou rejet des changements en attente et R-09 (phase 6). Reste à brancher l'OIDC réel \[Q-15\].
+**État au 3 novembre 2026** : phases 0 à 3 réalisées (socle ; planning et absences manuelles ; tampon, vignettes, fiche, fusion et division ; attribution par mail : brouillons, mails à valider, liens de réponse, réponses manuelles, annulation, modèles, notifications). Reporté volontairement : voyants de conflit F-08, alertes R-05 et R-06 dont « lien expiré » (phase 4) ; application des changements en attente, R-08 à R-10 (phase 6). Reste à brancher l'OIDC réel \[Q-15\] et le connecteur Microsoft d'envoi \[Q-01\].
 
 ### 15.1 Conseils pour le vibe coding
 

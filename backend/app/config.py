@@ -26,6 +26,20 @@ class Settings(BaseSettings):
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
 
+    # Mails sortants (F-50 à F-52). Le connecteur Microsoft (Graph ou Power Automate, Q-01)
+    # viendra s'ajouter derrière la même interface (app/mail.py).
+    # file : écrit des .eml dans MAIL_FILE_DIR (développement) ; smtp : relais interne ; disabled : refus
+    mail_backend: Literal["file", "smtp", "disabled"] = "file"
+    mail_from: str = "philippe.zander@example.local"
+    mail_file_dir: str = "./outbox-mails"
+    smtp_host: str | None = None
+    smtp_port: int = 25
+    smtp_starttls: bool = True
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    # Adresse publique (interne) de l'application, utilisée dans les liens de réponse (F-21)
+    public_base_url: str = "http://localhost:8080"
+
     # Comptes créés par le seed
     seed_admin_email: str = "philippe.zander@example.local"
     seed_admin_name: str = "Philippe Zander"

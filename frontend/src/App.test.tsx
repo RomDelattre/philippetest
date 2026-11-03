@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import PlanningPage from "./planning/PlanningPage";
@@ -55,6 +55,8 @@ const base: Record<string, unknown> = {
     pending_changes: [], history: [{ created_at: "2026-11-02T08:01:00Z", actor: "agent", action: "request.create",
       entity_type: "requests", before: null, after: null }],
   },
+  "/api/notifications": [],
+  "/api/outbox": [],
   "/api/mission-types": [
     { code: "MI", label: "Mission", color: "#2563eb", sort_order: 0 },
     { code: "AT", label: "Atelier", color: "#059669", sort_order: 2 },
@@ -65,7 +67,8 @@ const base: Record<string, unknown> = {
 function mockFetch(overrides: Record<string, { status: number; body: unknown }> = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
-    if (overrides[key]) return new Response(JSON.stringify(overrides[key].body), { status: overrides[key].status });
+    if (overrides[key])
+      return new Response(overrides[key].status === 204 ? null : JSON.stringify(overrides[key].body), { status: overrides[key].status });
     return new Response(JSON.stringify(base[url.split("?")[0]] ?? {}), { status: 200 });
   });
 }
@@ -226,5 +229,84 @@ describe("Zone tampon et vignettes (phase 2)", () => {
     await screen.findByTestId("vignette-r3");
     fireEvent.click(screen.getByRole("button", { name: "Replier la zone À attribuer" }));
     expect(screen.getByRole("button", { name: "Afficher la zone À attribuer" })).toHaveTextContent("À attribuer (1)");
+  });
+});
+
+import OutboxPage from "./outbox/OutboxPage";
+
+const outbox = [
+  { id: "m1", kind: "tech_proposal", to_email: "tech.a@example.local", subject: "Proposition D-2026-0001",
+    body: "Bonjour\nJ'accepte : {lien_accepter}\nJe refuse : {lien_refuser}", status: "draft", error: null,
+    request_id: "r1", request_ref: "D-2026-0001", assignment_id: "a1", technician_name: "Technicien A",
+    missing_links: [], created_at: "2026-11-03T09:00:00Z", sent_at: null, version: 2 },
+  { id: "m2", kind: "requester_confirmation", to_email: "", subject: "Confirmation D-2026-0002", body: "Bonjour",
+    status: "failed", error: "Adresse du destinataire manquante", request_id: "r2", request_ref: "D-2026-0002",
+    assignment_id: null, technician_name: null, missing_links: [], created_at: "2026-11-03T09:05:00Z", sent_at: null,
+    version: 1 },
+];
+
+describe("Mails à valider (phase 3)", () => {
+  it("affiche le compteur pour l'administrateur seulement (F-80)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "GET /api/me": { status: 200, body: { id: "9", email: "philippe.zander@example.local", display_name: "Philippe", role: "admin" } },
+      "GET /api/outbox": { status: 200, body: outbox },
+    }));
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /Mails à valider\s*2/ })).toBeInTheDocument();
+    cleanup();
+    vi.stubGlobal("fetch", mockFetch());
+    render(<App />);
+    await screen.findByTestId("current-user");
+    expect(screen.queryByRole("button", { name: /Mails à valider/ })).not.toBeInTheDocument();
+  });
+
+  it("liste, signale les liens manquants et envoie un lot (F-50, F-51)", async () => {
+    const fetchMock = mockFetch({
+      "GET /api/outbox": { status: 200, body: outbox },
+      "POST /api/outbox/send": { status: 200, body: [{ id: "m1", status: "sent", error: null }, { id: "m2", status: "failed", error: "Adresse du destinataire manquante" }] },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<OutboxPage onChanged={() => undefined} />);
+    const list = await screen.findByRole("region", { name: "Mails à valider" });
+    expect(within(list).getByText("Adresse manquante")).toBeInTheDocument();
+    expect(within(list).getByText("⚠ Échec")).toBeInTheDocument();
+
+    const editor = screen.getByRole("region", { name: "Mail sélectionné" });
+    fireEvent.change(within(editor).getByLabelText("Message"), { target: { value: "Bonjour sans lien" } });
+    expect(within(editor).getByText(/Variables obligatoires absentes/)).toBeInTheDocument();
+    expect(within(editor).getByRole("button", { name: "Envoyer" })).toBeDisabled();
+
+    fireEvent.click(within(list).getByLabelText("Tout sélectionner"));
+    fireEvent.click(screen.getByRole("button", { name: "Envoyer la sélection (2)" }));
+    expect(await screen.findByText(/1 envoyé\(s\), 1 en échec/)).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([url, init]) => init?.method === "POST" && String(url) === "/api/outbox/send");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ items: [{ id: "m1", version: 2 }, { id: "m2", version: 1 }] });
+  });
+});
+
+describe("Réponses et annulation depuis le planning (F-25, F-26)", () => {
+  it("enregistre une réponse reçue par téléphone", async () => {
+    const fetchMock = mockFetch({ "PATCH /api/assignments/a2": { status: 200, body: {} } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(within(await screen.findByTestId("bar-a2")).getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "✓ Accepte" }));
+    await screen.findByText(/Acceptation enregistrée/);
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ version: 1, response: "accept" });
+  });
+
+  it("demande confirmation pour annuler une proposition acceptée", async () => {
+    const fetchMock = mockFetch({ "DELETE /api/assignments/a1": { status: 204, body: null } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(within(await screen.findByTestId("bar-a1")).getByRole("button"));
+    expect(screen.queryByRole("button", { name: "✓ Accepte" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Annuler la proposition" }));
+    const dialog = screen.getByRole("dialog", { name: "Annuler la proposition ?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Annuler la proposition" }));
+    await screen.findByText(/Proposition annulée/);
+    const del = fetchMock.mock.calls.find(([, init]) => init?.method === "DELETE");
+    expect(String(del?.[0])).toBe("/api/assignments/a1?version=3&confirm=true");
   });
 });

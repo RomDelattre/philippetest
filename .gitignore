@@ -12,3 +12,4 @@ backend/data/*.csv
 !backend/data/technicians.example.csv
 .certs/
 *.tsbuildinfo
+outbox-mails/

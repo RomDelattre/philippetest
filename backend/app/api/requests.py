@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import audit
 from app.api.errors import check_version, not_found, unprocessable
-from app.api.planning import AssignmentOut, _technician, refresh_request_status
+from app.api.planning import AssignmentOut, _technician
 from app.auth import CurrentUserDep, SessionDep
 from app.models import (
     ACTIVE_ASSIGNMENT_STATUSES,
@@ -22,6 +22,7 @@ from app.models import (
     ChangeKind,
     ChangeRequest,
     MissionType,
+    OutboundKind,
     ProposalStatus,
     Request,
     RequestOrigin,
@@ -32,6 +33,9 @@ from app.models import (
 )
 from app.rules.requests import compute_missing_fields, split_period
 from app.rules.status import compute_request_status
+from app.services.outbox import discard_unsent, draft_tech_cancellation, draft_tech_proposal
+from app.services.responses import REFUSED_BADGE
+from app.services.status import refresh_request_status
 
 router = APIRouter(prefix="/api")
 
@@ -532,9 +536,12 @@ def create_assignment(
         if req.end_date < req.start_date:
             req.end_date = req.start_date
         _refresh_missing(req)
+    if REFUSED_BADGE in (req.badges or []):
+        req.badges = [b for b in req.badges if b != REFUSED_BADGE]
     _touch(req)
     session.flush()
     refresh_request_status(session, req)
+    draft_tech_proposal(session, a)  # F-20 : « Mail préparé, à valider »
     audit.record(session, user.audit_actor, "assignment.create", a, None, audit.snapshot(a))
     if not dated and body.write_dates_to_request:
         audit.record(session, user.audit_actor, "request.update", req, before_req, audit.snapshot(req))
@@ -543,20 +550,34 @@ def create_assignment(
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_draft_assignment(
-    assignment_id: UUID, version: Annotated[int, Query()], session: SessionDep, user: CurrentUserDep
+def cancel_assignment(
+    assignment_id: UUID,
+    version: Annotated[int, Query()],
+    session: SessionDep,
+    user: CurrentUserDep,
+    confirm: Annotated[bool, Query()] = False,
 ) -> Response:
-    """Retire une affectation en brouillon (jamais envoyée). Elle est conservée en « cancelled ».
-    L'annulation d'une proposition envoyée (F-26) passe par la boîte d'envoi."""
+    """Retire un brouillon, ou annule une proposition envoyée (F-26) après confirmation.
+    L'affectation est conservée en « cancelled » ; un mail d'information est préparé si besoin."""
     a = session.get(Assignment, assignment_id)
     if a is None:
         raise not_found("Activité")
     check_version(a.version, version)
-    if a.status != AssignmentStatus.DRAFT:
-        raise unprocessable("Seule une affectation en brouillon peut être retirée ici")
+    if a.status not in ACTIVE_ASSIGNMENT_STATUSES:
+        raise unprocessable("Cette activité n'est plus active")
+    sent = a.status in (AssignmentStatus.PENDING_RESPONSE, AssignmentStatus.ACCEPTED)
+    if sent and not confirm:
+        raise HTTPException(
+            status.HTTP_428_PRECONDITION_REQUIRED,
+            "Cette proposition a déjà été envoyée : confirmez l'annulation.",
+        )
     before = audit.snapshot(a)
     a.status = AssignmentStatus.CANCELLED
+    a.response_token_hash = None  # le lien envoyé n'est plus valable
+    discard_unsent(session, a.id, OutboundKind.TECH_PROPOSAL)
     session.flush()
+    if sent:
+        draft_tech_cancellation(session, a)
     req = session.get(Request, a.request_id)
     if req is not None:
         _touch(req)

@@ -94,10 +94,22 @@ def seed_anonymous_technicians(session: Session) -> None:
     if session.scalar(select(func.count()).select_from(Technician)):
         return
     for i, letter in enumerate(ascii_uppercase[:20]):
-        session.add(Technician(last_name=f"Technicien {letter}", role=TechnicianRole.MECHANIC, sort_order=i))
+        session.add(
+            Technician(
+                last_name=f"Technicien {letter}",
+                email=f"technicien.{letter.lower()}@example.local",
+                role=TechnicianRole.MECHANIC,
+                sort_order=i,
+            )
+        )
     for i, letter in enumerate(ascii_uppercase[:5]):
         session.add(
-            Technician(last_name=f"Électronicien {letter}", role=TechnicianRole.ELECTRONICIAN, sort_order=i)
+            Technician(
+                last_name=f"Électronicien {letter}",
+                email=f"electronicien.{letter.lower()}@example.local",
+                role=TechnicianRole.ELECTRONICIAN,
+                sort_order=i,
+            )
         )
     session.flush()
 
@@ -184,6 +196,7 @@ def seed_demo(session: Session, today: date | None = None) -> None:
         end = start + timedelta(days=rng.choice([0, 0, 1, 2, 4, 9])) if start else None
         location, client = rng.choice(places), rng.choice(clients)
         needed = rng.choice([1, 1, 1, 2, 2, 3])
+        chef = rng.choice("ABCDEFG")
         missing = [
             name
             for name, value in (
@@ -198,8 +211,8 @@ def seed_demo(session: Session, today: date | None = None) -> None:
             ref=f"D-{year}-{n:04d}",
             type_code=type_code,
             title=f"Demande de démonstration {n}",
-            requester_name=f"Chef de projet {rng.choice('ABCDEFG')}",
-            requester_email=None,
+            requester_name=f"Chef de projet {chef}",
+            requester_email=f"chef.{chef.lower()}@example.local",
             cf=f"CF{rng.randrange(10000, 99999)}" if rng.random() > 0.2 else None,
             client=client,
             location=location,

@@ -1,8 +1,8 @@
 """Phase 1 : planning (F-01 à F-08 hors conflits), déplacement d'activités (F-07),
 absences manuelles (F-31)."""
 
-from datetime import date
-from typing import Annotated
+from datetime import date, datetime
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
@@ -27,7 +27,9 @@ from app.models import (
     TechnicianRole,
 )
 from app.rules.periods import overlaps
-from app.rules.status import compute_request_status
+from app.services.outbox import draft_tech_cancellation, draft_tech_proposal
+from app.services.responses import apply_response
+from app.services.status import refresh_request_status
 
 router = APIRouter(prefix="/api")
 
@@ -62,6 +64,9 @@ class AssignmentOut(BaseModel):
     end_date: date
     status: AssignmentStatus
     partner_electronician_id: UUID | None
+    proposed_at: datetime | None = None
+    responded_at: datetime | None = None
+    token_expires_at: datetime | None = None
     version: int
 
 
@@ -96,6 +101,8 @@ class AssignmentPatch(BaseModel):
     end_date: date | None = None
     # F-07 : déplacer une activité déjà proposée ou confirmée exige une confirmation explicite
     confirm: bool = False
+    # F-25 : réponse saisie par Philippe (exclusive d'un déplacement)
+    response: Literal["accept", "refuse"] | None = None
 
 
 class AbsenceIn(BaseModel):
@@ -123,14 +130,6 @@ def _window(from_: date, to: date) -> None:
         raise unprocessable("« to » doit être postérieure ou égale à « from »")
     if (to - from_).days > MAX_WINDOW_DAYS:
         raise unprocessable("Fenêtre limitée à un an")
-
-
-def refresh_request_status(session: Session, request: Request) -> None:
-    """R-01 : seul point d'écriture de requests.status."""
-    statuses = session.scalars(select(Assignment.status).where(Assignment.request_id == request.id))
-    new = compute_request_status(request.technicians_needed, statuses, request.cancelled_at)
-    if new != request.status:
-        request.status = new
 
 
 def _technician(session: Session, tech_id: UUID, *, mechanic_only: bool = False) -> Technician:
@@ -215,6 +214,15 @@ def move_assignment(
     if a.status not in ACTIVE_ASSIGNMENT_STATUSES:
         raise unprocessable("Cette activité n'est plus active")
 
+    if body.response is not None:
+        if body.technician_id or body.start_date or body.end_date:
+            raise unprocessable("Une réponse ne peut pas être combinée à un déplacement")
+        if a.status not in (AssignmentStatus.DRAFT, AssignmentStatus.PENDING_RESPONSE):
+            raise unprocessable("Une réponse est déjà enregistrée pour cette activité")
+        apply_response(session, a, body.response, user.audit_actor, via_link=False)
+        session.commit()
+        return a
+
     new_tech = body.technician_id or a.technician_id
     new_start = body.start_date or a.start_date
     new_end = body.end_date or a.end_date
@@ -233,15 +241,18 @@ def move_assignment(
         )
 
     before = audit.snapshot(a)
+    old_tech = a.technician_id
     a.technician_id, a.start_date, a.end_date = new_tech, new_start, new_end
     if already_sent:
         # F-07 : retour en brouillon, l'ancien lien de réponse devient invalide.
-        # Le nouveau mail (F-20) sera préparé automatiquement à partir de la phase 3.
         a.status = AssignmentStatus.DRAFT
         a.response_token_hash = None
         a.token_expires_at = None
         a.responded_at = None
     session.flush()
+    if already_sent and old_tech != new_tech:
+        draft_tech_cancellation(session, a, technician_id=old_tech)  # F-26 : l'ancien technicien est prévenu
+    draft_tech_proposal(session, a)  # F-07 → F-20 : nouveau mail à valider
     req = session.get(Request, a.request_id)
     if req is not None:
         refresh_request_status(session, req)

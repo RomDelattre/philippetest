@@ -4,7 +4,7 @@ Application web interne qui remplace le planning Excel des techniciens : grille 
 zone tampon « À attribuer », attribution par mail avec validation humaine, absences issues des
 mails IRH, alertes, et agent d'ingestion (mail, Teams, SharePoint) branché sur un modèle d'IA interne.
 
-- Spécifications : [`docs/specifications.md`](docs/specifications.md) (v0.3)
+- Spécifications : [`docs/specifications.md`](docs/specifications.md) (v0.4)
 - Consignes de développement : [`CLAUDE.md`](CLAUDE.md)
 
 ## Démarrage rapide (Docker)
@@ -21,6 +21,14 @@ En mode `AUTH_MODE=dev`, un sélecteur permet de passer de Philippe (admin) à O
 Derrière un proxy d'entreprise qui inspecte le TLS, renseigner `EXTRA_CA_FILE` (chemin du
 certificat racine, placé dans le dossier du projet, par exemple `.certs/`) pour que le build
 puisse télécharger les dépendances.
+
+## Mails
+
+Aucun mail ne part sans validation dans l'écran « Mails à valider » (administrateur).
+`MAIL_BACKEND=file` écrit les mails en `.eml` dans le volume `mails` (développement) ;
+`MAIL_BACKEND=smtp` passe par le relais interne (`SMTP_HOST`, `SMTP_PORT`…).
+Les liens « J'accepte / Je refuse » pointent vers `PUBLIC_BASE_URL/api/respond/…` : ce chemin doit être
+exempté de l'authentification d'entreprise sur le reverse proxy.
 
 ## Remplacer les techniciens anonymisés par les vrais noms
 

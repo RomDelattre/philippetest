@@ -47,7 +47,19 @@ function readCollapsed(): boolean {
   }
 }
 
-export default function PlanningPage({ today = todayIso() }: { today?: string }) {
+export default function PlanningPage({
+  today = todayIso(),
+  isAdmin = true,
+  onActivity,
+  refreshToken = 0,
+}: {
+  today?: string;
+  isAdmin?: boolean;
+  /** change quand l'utilisateur revient sur le planning : rechargement des données */
+  refreshToken?: number;
+  /** appelé après chaque écriture (compteurs de mails et de notifications) */
+  onActivity?: () => void;
+}) {
   const [zoom, setZoom] = useState<Zoom>("8w");
   const [anchor, setAnchor] = useState(today);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -62,6 +74,7 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
   const [absenceDraft, setAbsenceDraft] = useState<AbsenceDraft | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMove>(null);
   const [pendingDrop, setPendingDrop] = useState<DropOfVignette | null>(null);
+  const [pendingCancel, setPendingCancel] = useState<Assignment | null>(null);
   const [writeDates, setWriteDates] = useState(true);
   const [creating, setCreating] = useState<RequestFields | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -89,14 +102,17 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
 
   const reload = useCallback(async () => {
     await Promise.all([reloadPlanning(), reloadBuffer()]);
-  }, [reloadPlanning, reloadBuffer]);
+    onActivity?.();
+  }, [reloadPlanning, reloadBuffer, onActivity]);
+
+  const mailNote = isAdmin ? "Mail préparé, à valider." : "Mail préparé : Philippe doit le valider.";
 
   useEffect(() => {
     void reloadPlanning();
-  }, [reloadPlanning]);
+  }, [reloadPlanning, refreshToken]);
   useEffect(() => {
     void reloadBuffer();
-  }, [reloadBuffer]);
+  }, [reloadBuffer, refreshToken]);
   useEffect(() => {
     api<MissionType[]>("/mission-types").then(setMissionTypes, () => setMissionTypes([]));
   }, []);
@@ -138,8 +154,8 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
       setNotice({
         kind: "info",
         text: needsConfirmation(a.status)
-          ? "Activité déplacée et remise en brouillon : l'ancien lien de réponse n'est plus valable."
-          : "Activité déplacée.",
+          ? `Activité déplacée et remise en brouillon : l'ancien lien de réponse n'est plus valable. ${mailNote}`
+          : `Activité déplacée. ${mailNote}`,
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 428) setPendingMove({ assignment: a, period });
@@ -170,7 +186,7 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
       });
       setNotice({
         kind: "info",
-        text: `${drop.vignette.ref} attribuée en brouillon à ${tech ? techName(tech) : "?"}, du ${formatDate(drop.start)} au ${formatDate(drop.end)}.`,
+        text: `${drop.vignette.ref} attribuée en brouillon à ${tech ? techName(tech) : "?"}, du ${formatDate(drop.start)} au ${formatDate(drop.end)}. ${mailNote}`,
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409)
@@ -195,6 +211,37 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
     onMove: requestMove,
     onDropVignette,
   });
+
+  // ------------------------------------------------------------------ F-25, F-26 : réponse saisie, annulation
+  const respond = async (a: Assignment, answer: "accept" | "refuse") => {
+    try {
+      await sendJson("PATCH", `/assignments/${a.id}`, { version: a.version, response: answer });
+      setNotice({
+        kind: "info",
+        text: answer === "accept"
+          ? `Acceptation enregistrée.${isAdmin ? " La confirmation au demandeur est prête à valider." : ""}`
+          : "Refus enregistré : la demande revient dans la zone À attribuer.",
+      });
+    } catch (err) {
+      setNotice({ kind: "error", text: err instanceof Error ? err.message : "Enregistrement impossible." });
+    }
+    await reload();
+  };
+
+  const cancelAssignment = async (a: Assignment, confirm: boolean) => {
+    try {
+      await sendJson("DELETE", `/assignments/${a.id}?version=${a.version}${confirm ? "&confirm=true" : ""}`);
+      setPanel(null);
+      setNotice({
+        kind: "info",
+        text: a.status === "draft" ? "Affectation retirée." : `Proposition annulée. Un mail d'information au technicien est prêt${isAdmin ? " à valider" : ""}.`,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 428) setPendingCancel(a);
+      else setNotice({ kind: "error", text: err instanceof Error ? err.message : "Annulation impossible." });
+    }
+    await reload();
+  };
 
   // ------------------------------------------------------------------ F-31 : absences
   const saveAbsence = async (draft: AbsenceDraft): Promise<string | null> => {
@@ -403,6 +450,12 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
               onSave={(period) => requestMove(selectedAssignment, period)}
               onClose={() => setPanel(null)}
               onOpenRequest={(id) => setPanel({ kind: "request", id })}
+              onRespond={(answer) => void respond(selectedAssignment, answer)}
+              onCancel={() =>
+                needsConfirmation(selectedAssignment.status)
+                  ? setPendingCancel(selectedAssignment)
+                  : void cancelAssignment(selectedAssignment, false)
+              }
             />
           )}
           {panel?.kind === "request" && (
@@ -454,6 +507,25 @@ export default function PlanningPage({ today = todayIso() }: { today?: string })
             const m = pendingMove;
             setPendingMove(null);
             void saveMove(m.assignment, m.period, true);
+          }}
+        />
+      )}
+
+      {pendingCancel && (
+        <ConfirmDialog
+          title="Annuler la proposition ?"
+          message={
+            <p>
+              Le lien de réponse envoyé au technicien ne sera plus valable et l'affectation sera retirée du planning. Un mail
+              d'information au technicien sera préparé{isAdmin ? ", à valider dans « Mails à valider »" : ""}.
+            </p>
+          }
+          confirmLabel="Annuler la proposition"
+          onCancel={() => setPendingCancel(null)}
+          onConfirm={() => {
+            const a = pendingCancel;
+            setPendingCancel(null);
+            void cancelAssignment(a, true);
           }}
         />
       )}

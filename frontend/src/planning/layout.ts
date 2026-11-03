@@ -195,6 +195,7 @@ export const FIELD_LABELS: Record<string, string> = {
 export const BADGE_LABELS: Record<string, string> = {
   dates_modified: "Dates modifiées",
   technician_absent: "Technicien absent",
+  technician_refused: "Refusée par un technicien",
 };
 
 export const REQUEST_STATUS_LABELS: Record<string, string> = {

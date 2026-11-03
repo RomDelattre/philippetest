@@ -39,7 +39,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function sendJson<T>(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+export function sendJson<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   return api<T>(path, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -106,6 +106,9 @@ export interface Assignment {
   end_date: string;
   status: AssignmentStatus;
   partner_electronician_id: string | null;
+  proposed_at?: string | null;
+  responded_at?: string | null;
+  token_expires_at?: string | null;
   version: number;
 }
 export interface Absence {
@@ -211,4 +214,52 @@ export interface RequestDetail extends RequestFields {
     before: Record<string, unknown> | null;
     after: Record<string, unknown> | null;
   }[];
+}
+
+export type OutboundKind = "tech_proposal" | "requester_confirmation" | "generic";
+export type OutboundStatus = "draft" | "validated" | "sent" | "failed" | "discarded";
+
+export interface OutboxItem {
+  id: string;
+  kind: OutboundKind;
+  to_email: string;
+  subject: string;
+  body: string;
+  status: OutboundStatus;
+  error: string | null;
+  request_id: string | null;
+  request_ref: string | null;
+  assignment_id: string | null;
+  technician_name: string | null;
+  missing_links: string[];
+  created_at: string;
+  sent_at: string | null;
+  version: number;
+}
+
+export interface SendResult {
+  id: string;
+  status: OutboundStatus | null;
+  error: string | null;
+}
+
+export interface MailTemplate {
+  subject: string;
+  body: string;
+}
+export interface MailTemplates {
+  tech_proposal: MailTemplate;
+  requester_confirmation: MailTemplate;
+  tech_cancellation: MailTemplate;
+}
+
+export interface AppNotification {
+  id: string;
+  kind: string;
+  message: string;
+  request_id: string | null;
+  assignment_id: string | null;
+  created_at: string;
+  read_at: string | null;
+  version: number;
 }

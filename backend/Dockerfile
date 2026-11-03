@@ -10,7 +10,7 @@ RUN --mount=type=secret,id=extra_ca \
     pip install --no-cache-dir .
 COPY alembic.ini ./
 COPY alembic ./alembic
-RUN useradd --system --no-create-home app
+RUN useradd --system --no-create-home app && mkdir -p /data/outbox-mails && chown app /data/outbox-mails
 USER app
 EXPOSE 8000
 # Les migrations sont appliquées au démarrage ; ne jamais modifier une migration existante.
