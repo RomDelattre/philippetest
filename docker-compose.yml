@@ -1,0 +1,54 @@
+# Déploiement interne (section 4) : base, API, front. Le worker agent arrivera en phase 5.
+# Le TLS et l'authentification d'entreprise sont assurés par le reverse proxy placé devant « web ».
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-planning}
+      POSTGRES_USER: ${POSTGRES_USER:-planning}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      secrets: [extra_ca]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-planning}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-planning}
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      DEV_USER_EMAIL: ${DEV_USER_EMAIL:-philippe.zander@example.local}
+      PROXY_USER_HEADER: ${PROXY_USER_HEADER:-X-Forwarded-Email}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-philippe.zander@example.local}
+      SEED_PLANNER_EMAIL: ${SEED_PLANNER_EMAIL:-olivier@example.local}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      secrets: [extra_ca]
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+secrets:
+  extra_ca:
+    file: ${EXTRA_CA_FILE:-/dev/null}
