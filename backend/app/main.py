@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.api import planning
 from app.api.routes import router
 from app.config import get_settings
 
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(router)
+    app.include_router(planning.router)
     return app
 
 

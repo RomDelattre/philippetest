@@ -76,4 +76,15 @@ Bearer validé par JWKS). L'utilisateur doit exister dans `users` (rôles `admin
 ## État d'avancement
 
 - Phase 0 : faite (socle, modèle de données complet, migration 0001, auth, seed, tests).
-- Prochaine étape : phase 1 (planning F-01 à F-08 sans conflits, absences manuelles).
+- Phase 1 : faite. API `GET /planning`, `GET/PATCH /assignments/{id}`, CRUD `/absences`
+  (`backend/app/api/planning.py`) ; grille `frontend/src/planning/` (calculs purs dans `layout.ts`).
+  Reporté : nouveau mail après déplacement (F-07 → F-20, phase 3), R-09 sur absence (F-32, phase 6),
+  voyants de conflit (F-08, phase 4).
+- Prochaine étape : phase 2 (tampon, vignettes, formulaire manuel, F-10 à F-15).
+
+## Repères front
+
+- Glisser-déposer : `@dnd-kit/core`, une barre = poignée début + corps (déplacement) + poignée fin.
+  Pas de transformation visuelle : un aperçu (`drag-preview`) est dessiné dans la ligne cible.
+- Le panneau latéral offre l'alternative clavier au glisser-déposer (technicien, début, fin).
+- Toute écriture envoie `version` ; 409 → message et rechargement ; 428 → dialogue de confirmation.

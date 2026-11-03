@@ -421,7 +421,7 @@ Chaque phase doit être utilisable et testée avant la suivante. À la fin de ch
 
 Les phases 1 à 4 ne dépendent d'aucune autorisation IT : elles peuvent démarrer immédiatement, pendant que la demande d'accès Microsoft (Q-01, Q-10) est traitée.
 
-**État au 3 novembre 2026** : phase 0 réalisée (dépôt planning-ats : Docker Compose, PostgreSQL, migration initiale de toutes les tables de la section 6, authentification en mode développement et OIDC, seed, CLAUDE.md). Reste à brancher l'OIDC réel quand l'IT fournira l'inscription d'application \[Q-15\].
+**État au 3 novembre 2026** : phase 0 réalisée (Docker Compose, PostgreSQL, migration initiale de toutes les tables de la section 6, authentification dev / proxy / OIDC, seed, CLAUDE.md). Phase 1 réalisée (planning F-01 à F-07, glisser-déposer et redimensionnement, absences manuelles F-31). Reporté volontairement : la préparation du nouveau mail lors d’un déplacement (F-07 → F-20) arrive avec la boîte d’envoi en phase 3 ; l’application de R-09 aux absences (F-32) arrive en phase 6 ; les voyants de conflit (F-08) en phase 4. Reste à brancher l’OIDC réel \[Q-15\].
 
 ### 15.1 Conseils pour le vibe coding
 
