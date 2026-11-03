@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type AppNotification, DEV_USER_KEY, type Health, type Me, type OutboxItem, sendJson } from "./api";
+import { useCallback, useEffect, useState } from "react";
+import AlertCenter from "./alerts/AlertCenter";
+import { type Alert, api, ApiError, type AppNotification, DEV_USER_KEY, type Health, type Me, type OutboxItem } from "./api";
 import OutboxPage from "./outbox/OutboxPage";
-import PlanningPage from "./planning/PlanningPage";
+import PlanningPage, { type PlanningFocus } from "./planning/PlanningPage";
 
 const DEV_USERS = [
   { email: "philippe.zander@example.local", label: "Philippe (admin)" },
@@ -14,12 +15,6 @@ type View = "planning" | "outbox";
 
 const POLL_MS = 60_000;
 
-function dateTime(iso: string): string {
-  return new Intl.DateTimeFormat("fr-BE", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Brussels" }).format(
-    new Date(iso),
-  );
-}
-
 export default function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
@@ -27,9 +22,9 @@ export default function App() {
   const [planningRefresh, setPlanningRefresh] = useState(0);
   const [outboxCount, setOutboxCount] = useState<number | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [focus, setFocus] = useState<PlanningFocus | null>(null);
   const isAdmin = state.kind === "ready" && state.session.me.role === "admin";
-  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +47,7 @@ export default function App() {
   const refreshCounts = useCallback(() => {
     if (state.kind !== "ready") return;
     api<AppNotification[]>("/notifications").then(setNotifications, () => undefined);
+    api<Alert[]>("/alerts").then(setAlerts, () => undefined);
     if (state.session.me.role === "admin")
       api<OutboxItem[]>("/outbox?view=pending").then((l) => setOutboxCount(l.length), () => setOutboxCount(null));
   }, [state]);
@@ -66,15 +62,6 @@ export default function App() {
     if (!isAdmin && view === "outbox") setView("planning");
   }, [isAdmin, view]);
 
-  useEffect(() => {
-    if (!showNotifications) return;
-    const close = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotifications(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [showNotifications]);
-
   const switchDevUser = (email: string) => {
     try {
       localStorage.setItem(DEV_USER_KEY, email);
@@ -84,7 +71,6 @@ export default function App() {
     setReloadKey((k) => k + 1);
   };
 
-  const unread = notifications.filter((n) => !n.read_at).length;
   const navBtn = (active: boolean) =>
     `rounded px-3 py-1 text-sm ${active ? "bg-slate-800 text-white" : "text-slate-700 hover:bg-slate-100"}`;
 
@@ -113,57 +99,16 @@ export default function App() {
         <div className="ml-auto flex items-center gap-3 text-sm">
           {state.kind === "ready" && (
             <>
-              <div className="relative" ref={notifRef}>
-                <button
-                  type="button"
-                  className="rounded border border-slate-300 px-2 py-0.5"
-                  aria-expanded={showNotifications}
-                  aria-label={`Notifications, ${unread} non lue(s)`}
-                  onClick={() => setShowNotifications((v) => !v)}
-                >
-                  🔔 {unread > 0 && <span className="rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">{unread}</span>}
-                </button>
-                {showNotifications && (
-                  <div className="absolute right-0 z-50 mt-1 w-96 rounded border border-slate-300 bg-white shadow-lg" role="dialog" aria-label="Notifications">
-                    <div className="flex items-center border-b border-slate-200 px-3 py-1.5">
-                      <span className="font-medium">Réponses des techniciens</span>
-                      {unread > 0 && (
-                        <button
-                          type="button"
-                          className="ml-auto text-xs text-sky-700 underline"
-                          onClick={() => void sendJson("POST", "/notifications/read-all").then(refreshCounts)}
-                        >
-                          Tout marquer comme lu
-                        </button>
-                      )}
-                    </div>
-                    {notifications.length === 0 ? (
-                      <p className="px-3 py-2 text-slate-500">Aucune notification.</p>
-                    ) : (
-                      <ul className="max-h-80 overflow-y-auto">
-                        {notifications.map((n) => (
-                          <li key={n.id} className={`flex gap-2 border-b border-slate-100 px-3 py-1.5 ${n.read_at ? "text-slate-500" : ""}`}>
-                            <span aria-hidden>{n.kind === "refused" ? "✕" : n.kind === "accepted" ? "✓" : "•"}</span>
-                            <span className="flex-1">
-                              {n.message}
-                              <span className="block text-xs text-slate-500">{dateTime(n.created_at)}</span>
-                            </span>
-                            {!n.read_at && (
-                              <button
-                                type="button"
-                                className="text-xs text-sky-700 underline"
-                                onClick={() => void sendJson("POST", `/notifications/${n.id}/read`).then(refreshCounts)}
-                              >
-                                Lu
-                              </button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </div>
+              <AlertCenter
+                alerts={alerts}
+                notifications={notifications}
+                isAdmin={isAdmin}
+                onRefresh={refreshCounts}
+                onOpen={(a) => {
+                  setView("planning");
+                  setFocus({ requestId: a.request_id, assignmentId: a.assignment_id, date: a.date, nonce: Date.now() });
+                }}
+              />
               {state.session.health.auth_mode === "dev" && (
                 <label className="flex items-center gap-1 text-slate-600">
                   <span>Utilisateur de test</span>
@@ -203,7 +148,7 @@ export default function App() {
           <>
             {/* le planning reste monté pour garder filtres et position */}
             <div className={view === "planning" ? "h-full" : "hidden"}>
-              <PlanningPage key={state.session.me.id} isAdmin={isAdmin} onActivity={refreshCounts} refreshToken={planningRefresh} />
+              <PlanningPage key={state.session.me.id} isAdmin={isAdmin} onActivity={refreshCounts} refreshToken={planningRefresh} focus={focus} />
             </div>
             {view === "outbox" && isAdmin && <OutboxPage onChanged={refreshCounts} />}
           </>

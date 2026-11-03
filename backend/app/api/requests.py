@@ -1,17 +1,17 @@
 """Phase 2 : zone tampon et vignettes (F-10 à F-15), attribution par glisser-déposer (R-03).
 Le brouillon de mail de F-20 arrive avec la boîte d'envoi (phase 3)."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.api.errors import check_version, not_found, unprocessable
+from app.api.errors import check_version, not_found, precondition, unprocessable
 from app.api.planning import AssignmentOut, _technician
 from app.auth import CurrentUserDep, SessionDep
 from app.models import (
@@ -33,6 +33,8 @@ from app.models import (
 )
 from app.rules.requests import compute_missing_fields, split_period
 from app.rules.status import compute_request_status
+from app.services.alerts import alert_settings, holidays_between, placement_conflicts, request_date_alert
+from app.services.dates import today_brussels
 from app.services.outbox import discard_unsent, draft_tech_cancellation, draft_tech_proposal
 from app.services.responses import REFUSED_BADGE
 from app.services.status import refresh_request_status
@@ -150,6 +152,8 @@ class VignetteOut(BaseModel):
     pending_changes: list[ChangeKind]
     origin: RequestOrigin
     date_flexible: bool
+    date_alert: Literal["red", "orange"] | None = None
+    working_days_left: int | None = None
     version: int
 
 
@@ -218,6 +222,8 @@ class AssignmentCreate(BaseModel):
     confirm_dates_differ: bool = False
     # R-03 : demande sans dates complètes → proposer d'y écrire les dates de l'affectation
     write_dates_to_request: bool = False
+    # R-02 : attribuer malgré un chevauchement ou une absence
+    confirm_conflict: bool = False
 
     @model_validator(mode="after")
     def _period(self) -> "AssignmentCreate":
@@ -317,6 +323,10 @@ def _vignettes(session: Session, requests: list[Request]) -> list[VignetteOut]:
         ).all()
     )
     changes = _pending_changes(session, ids)
+    today = today_brussels()
+    settings = alert_settings(session)
+    holidays = holidays_between(session, today, today + timedelta(days=400))
+    alerts = {r.id: request_date_alert(r, today, holidays, settings) for r in requests}
     return [
         VignetteOut(
             id=r.id,
@@ -338,6 +348,8 @@ def _vignettes(session: Session, requests: list[Request]) -> list[VignetteOut]:
             pending_changes=changes.get(r.id, []),
             origin=r.origin,
             date_flexible=r.date_flexible,
+            date_alert=(alerts[r.id] or (None, None))[0],
+            working_days_left=(alerts[r.id] or (None, None))[1],
             version=r.version,
         )
         for r in requests
@@ -517,9 +529,10 @@ def create_assignment(
         and (body.start_date, body.end_date) != (req.start_date, req.end_date)
         and not body.confirm_dates_differ
     ):
-        raise HTTPException(
-            status.HTTP_428_PRECONDITION_REQUIRED, "Les dates diffèrent de celles de la demande : confirmez."
-        )
+        raise precondition("dates_differ", "Les dates diffèrent de celles de la demande : confirmez.")
+    conflicts = placement_conflicts(session, body.technician_id, body.start_date, body.end_date)
+    if conflicts and not body.confirm_conflict:
+        raise precondition("conflict", f"Conflit : {' ; '.join(conflicts)}. Attribuer quand même ?")  # R-02
 
     before_req = audit.snapshot(req)
     a = Assignment(
@@ -567,10 +580,7 @@ def cancel_assignment(
         raise unprocessable("Cette activité n'est plus active")
     sent = a.status in (AssignmentStatus.PENDING_RESPONSE, AssignmentStatus.ACCEPTED)
     if sent and not confirm:
-        raise HTTPException(
-            status.HTTP_428_PRECONDITION_REQUIRED,
-            "Cette proposition a déjà été envoyée : confirmez l'annulation.",
-        )
+        raise precondition("confirm_sent", "Cette proposition a déjà été envoyée : confirmez l'annulation.")
     before = audit.snapshot(a)
     a.status = AssignmentStatus.CANCELLED
     a.response_token_hash = None  # le lien envoyé n'est plus valable

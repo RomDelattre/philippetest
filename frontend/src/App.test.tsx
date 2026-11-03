@@ -31,6 +31,12 @@ const planning = {
   ],
   absences: [{ id: "ab1", technician_id: "t2", start_date: "2026-11-16", end_date: "2026-11-18", category: "leave", version: 1 }],
   holidays: [{ date: "2026-11-11", label: "Armistice" }],
+  conflicts: [
+    { assignment_id: "a1", level: "red", items: [
+      { level: "red", code: "absence", message: "Technicien absent du 10/11/2026 au 10/11/2026" },
+      { level: "orange", code: "holiday", message: "Couvre un jour férié (11/11/2026)" },
+    ] },
+  ],
 };
 
 const base: Record<string, unknown> = {
@@ -56,6 +62,7 @@ const base: Record<string, unknown> = {
       entity_type: "requests", before: null, after: null }],
   },
   "/api/notifications": [],
+  "/api/alerts": [],
   "/api/outbox": [],
   "/api/mission-types": [
     { code: "MI", label: "Mission", color: "#2563eb", sort_order: 0 },
@@ -308,5 +315,70 @@ describe("Réponses et annulation depuis le planning (F-25, F-26)", () => {
     await screen.findByText(/Proposition annulée/);
     const del = fetchMock.mock.calls.find(([, init]) => init?.method === "DELETE");
     expect(String(del?.[0])).toBe("/api/assignments/a1?version=3&confirm=true");
+  });
+});
+
+
+describe("Conflits et alertes (phase 4)", () => {
+  it("affiche le voyant de conflit sur la barre et dans le panneau (F-08)", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PlanningPage today="2026-11-04" />);
+    const bar = await screen.findByTestId("bar-a1");
+    expect(bar).toHaveAttribute("data-conflict", "red");
+    expect(bar).toHaveTextContent("⛔");
+    expect(bar.getAttribute("title")).toContain("Technicien absent du 10/11/2026");
+    expect(screen.getByTestId("bar-a2")).not.toHaveAttribute("data-conflict");
+    fireEvent.click(within(bar).getByRole("button"));
+    const list = screen.getByRole("list", { name: "Conflits" });
+    expect(list).toHaveTextContent("Couvre un jour férié");
+  });
+
+  it("affiche l'alerte de date proche sur la vignette (R-06, F-11)", async () => {
+    const vignettes = [{ ...(base["/api/requests"] as object[])[0], date_alert: "red", working_days_left: 3 }];
+    vi.stubGlobal("fetch", mockFetch({ "GET /api/requests": { status: 200, body: vignettes } }));
+    render(<PlanningPage today="2026-11-04" />);
+    expect(await screen.findByTestId("vignette-r3")).toHaveTextContent("Date proche : 3 j ouvré(s)");
+  });
+
+  it("demande confirmation d'un chevauchement puis renvoie avec confirm_conflict (R-02)", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        calls += 1;
+        return calls === 1
+          ? new Response(JSON.stringify({ detail: { code: "conflict", message: "Conflit : chevauchement avec D-2026-0001. Placer quand même ?" } }), { status: 428 })
+          : new Response("{}", { status: 200 });
+      }
+      return new Response(JSON.stringify(base[url.split("?")[0]] ?? {}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(within(await screen.findByTestId("bar-a2")).getByRole("button"));
+    fireEvent.change(screen.getByLabelText("Technicien"), { target: { value: "t1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+    const dialog = await screen.findByRole("dialog", { name: "Conflit de planning" });
+    expect(dialog).toHaveTextContent("chevauchement avec D-2026-0001");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Placer quand même" }));
+    await screen.findByText(/Activité déplacée/);
+    const patches = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patches[1][1]?.body))).toMatchObject({ technician_id: "t1", confirm_conflict: true });
+  });
+
+  it("le centre d'alertes ouvre la barre concernée (F-40, F-41)", async () => {
+    const alerts = [
+      { key: "assignment:a1", level: "red", kind: "conflict", message: "D-2026-0001 · Technicien A : absent", request_id: "r1",
+        request_ref: "D-2026-0001", assignment_id: "a1", date: "2026-11-09" },
+      { key: "date:r3", level: "orange", kind: "date_close", message: "D-2026-0003 dans 8 jour(s) ouvré(s)", request_id: "r3",
+        request_ref: "D-2026-0003", assignment_id: null, date: "2026-11-23" },
+    ];
+    vi.stubGlobal("fetch", mockFetch({ "GET /api/alerts": { status: 200, body: alerts } }));
+    render(<App />);
+    const bell = await screen.findByRole("button", { name: /Alertes : 2 dont 1 rouge/ });
+    expect(bell).toHaveTextContent("⛔ 1");
+    expect(bell).toHaveTextContent("⚠ 1");
+    fireEvent.click(bell);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Centre d'alertes" })).getByText(/Technicien A : absent/));
+    const panel = await screen.findByRole("complementary", { name: "Détail de l'activité" });
+    expect(panel).toHaveTextContent("Visite délégation");
   });
 });

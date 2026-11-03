@@ -2,7 +2,7 @@
 // Le contexte de glisser-déposer (F-07, R-03) est fourni par PlanningPage via dnd.ts.
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { memo, type CSSProperties, type MouseEvent } from "react";
-import type { Absence, Assignment, MissionType, RequestSummary, Technician } from "../api";
+import type { Absence, Assignment, AssignmentConflicts, MissionType, RequestSummary, Technician } from "../api";
 import { formatDate, WEEKDAY_INITIALS, weekdayIndex } from "../dates";
 import {
   ABSENCE_LABELS,
@@ -38,6 +38,8 @@ export interface GridProps {
   onEmptyClick: (technicianId: string, iso: string) => void;
   /** Aperçu du glisser-déposer en cours (déplacement d'une barre ou dépose d'une vignette). */
   drag: GridDrag | null;
+  /** F-08 : conflits par assignment (R-05) */
+  conflicts?: Map<string, AssignmentConflicts>;
 }
 
 export interface GridDrag {
@@ -239,6 +241,7 @@ function Row(p: RowProps) {
               dimmed={hasFilter && !matchesFilters(a, req, p.filters)}
               selected={p.selectedId === a.id}
               dragging={drag?.sourceAssignmentId === a.id}
+              conflict={p.conflicts?.get(a.id)}
               onSelect={p.onSelect}
             />
           );
@@ -282,8 +285,11 @@ interface BarProps {
   dimmed: boolean;
   selected: boolean;
   dragging: boolean;
+  conflict?: AssignmentConflicts;
   onSelect: (id: string) => void;
 }
+
+export const CONFLICT_ICON = { red: "⛔", orange: "⚠" } as const;
 
 function barStyle(a: Assignment, color: string): CSSProperties {
   const text = readableText(color);
@@ -313,7 +319,7 @@ function Handle({ id, side, assignmentId }: { id: string; side: "start" | "end";
   );
 }
 
-function Bar({ assignment: a, request, pos, type, dimmed, selected, dragging, onSelect }: BarProps) {
+function Bar({ assignment: a, request, pos, type, dimmed, selected, dragging, conflict, onSelect }: BarProps) {
   const { setNodeRef, listeners, attributes } = useDraggable({ id: `move:${a.id}`, data: { kind: "move", assignmentId: a.id } });
   const color = type?.color ?? "#64748b";
   const code = request?.type_code ?? "?";
@@ -322,11 +328,13 @@ function Bar({ assignment: a, request, pos, type, dimmed, selected, dragging, on
     `${request?.ref ?? ""} – ${label}`,
     `Du ${formatDate(a.start_date)} au ${formatDate(a.end_date)}`,
     ASSIGNMENT_STATUS_LABELS[a.status],
+    ...(conflict?.items.map((c) => `${CONFLICT_ICON[c.level]} ${c.message}`) ?? []),
   ].join("\n");
   return (
     <div
       data-testid={`bar-${a.id}`}
-      className={`relative z-10 my-1 rounded-sm border text-xs ${dimmed ? "opacity-25" : ""} ${dragging ? "opacity-50" : ""} ${selected ? "ring-2 ring-sky-600 ring-offset-1" : ""} ${pos.clippedStart ? "rounded-l-none" : ""} ${pos.clippedEnd ? "rounded-r-none" : ""}`}
+      data-conflict={conflict?.level}
+      className={`relative z-10 my-1 rounded-sm border text-xs ${conflict ? (conflict.level === "red" ? "outline-2 outline-red-600" : "outline-2 outline-amber-500") : ""} ${dimmed ? "opacity-25" : ""} ${dragging ? "opacity-50" : ""} ${selected ? "ring-2 ring-sky-600 ring-offset-1" : ""} ${pos.clippedStart ? "rounded-l-none" : ""} ${pos.clippedEnd ? "rounded-r-none" : ""}`}
       style={{ gridColumn: `${pos.column} / span ${pos.span}`, gridRow: 1, ...barStyle(a, color) }}
       title={tooltip}
     >
@@ -337,9 +345,14 @@ function Bar({ assignment: a, request, pos, type, dimmed, selected, dragging, on
         {...listeners}
         {...attributes}
         onClick={() => onSelect(a.id)}
-        aria-label={`${request?.ref ?? "Activité"} : ${label}, ${ASSIGNMENT_STATUS_LABELS[a.status]}`}
+        aria-label={`${request?.ref ?? "Activité"} : ${label}, ${ASSIGNMENT_STATUS_LABELS[a.status]}${conflict ? `, ${conflict.items.map((c) => c.message).join(", ")}` : ""}`}
         className="block h-full w-full cursor-grab overflow-hidden px-1.5 text-left font-medium whitespace-nowrap active:cursor-grabbing"
       >
+        {conflict && (
+          <span className={`mr-0.5 inline-block rounded-sm bg-white px-0.5 ${conflict.level === "red" ? "text-red-700" : "text-amber-700"}`} aria-hidden>
+            {CONFLICT_ICON[conflict.level]}
+          </span>
+        )}
         {a.status === "draft" && "✎ "}
         {label}
       </button>

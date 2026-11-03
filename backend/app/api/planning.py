@@ -1,17 +1,17 @@
 """Phase 1 : planning (F-01 à F-08 hors conflits), déplacement d'activités (F-07),
 absences manuelles (F-31)."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Query, Response, status
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.api.errors import check_version, not_found, unprocessable
+from app.api.errors import check_version, not_found, precondition, unprocessable
 from app.api.routes import HolidayOut, TechnicianOut
 from app.auth import CurrentUserDep, SessionDep
 from app.models import (
@@ -26,7 +26,9 @@ from app.models import (
     Technician,
     TechnicianRole,
 )
+from app.rules.conflicts import level_of
 from app.rules.periods import overlaps
+from app.services.alerts import conflicts_for, placement_conflicts
 from app.services.outbox import draft_tech_cancellation, draft_tech_proposal
 from app.services.responses import apply_response
 from app.services.status import refresh_request_status
@@ -84,6 +86,18 @@ class AbsenceOut(BaseModel):
     version: int
 
 
+class ConflictOut(BaseModel):
+    level: str
+    code: str
+    message: str
+
+
+class AssignmentConflicts(BaseModel):
+    assignment_id: UUID
+    level: str
+    items: list[ConflictOut]
+
+
 class PlanningOut(BaseModel):
     window_start: date
     window_end: date
@@ -92,6 +106,7 @@ class PlanningOut(BaseModel):
     requests: list[RequestSummary]
     absences: list[AbsenceOut]
     holidays: list[HolidayOut]
+    conflicts: list[AssignmentConflicts] = []
 
 
 class AssignmentPatch(BaseModel):
@@ -101,6 +116,8 @@ class AssignmentPatch(BaseModel):
     end_date: date | None = None
     # F-07 : déplacer une activité déjà proposée ou confirmée exige une confirmation explicite
     confirm: bool = False
+    # R-02 : placer malgré un chevauchement ou une absence
+    confirm_conflict: bool = False
     # F-25 : réponse saisie par Philippe (exclusive d'un déplacement)
     response: Literal["accept", "refuse"] | None = None
 
@@ -187,6 +204,14 @@ def get_planning(
         requests=[RequestSummary.model_validate(r) for r in requests],
         absences=[AbsenceOut.model_validate(a) for a in absences],
         holidays=[HolidayOut.model_validate(h) for h in holidays],
+        conflicts=[
+            AssignmentConflicts(
+                assignment_id=a_id,
+                level=level_of(items) or "orange",
+                items=[ConflictOut(level=c.level, code=c.code, message=c.message) for c in items],
+            )
+            for a_id, items in conflicts_for(session, list(assignments), datetime.now(UTC)).items()
+        ],
     )
 
 
@@ -235,10 +260,13 @@ def move_assignment(
 
     already_sent = a.status in (AssignmentStatus.PENDING_RESPONSE, AssignmentStatus.ACCEPTED)
     if already_sent and not body.confirm:
-        raise HTTPException(
-            status.HTTP_428_PRECONDITION_REQUIRED,
-            "Cette activité a déjà été proposée au technicien : confirmez le déplacement.",
+        raise precondition(
+            "confirm_sent", "Cette activité a déjà été proposée au technicien : confirmez le déplacement."
         )
+    conflicts = placement_conflicts(session, new_tech, new_start, new_end, exclude=a.id)
+    if conflicts and not body.confirm_conflict:
+        # R-02 : un chevauchement n'est permis qu'après confirmation explicite
+        raise precondition("conflict", f"Conflit : {' ; '.join(conflicts)}. Placer quand même ?")
 
     before = audit.snapshot(a)
     old_tech = a.technician_id

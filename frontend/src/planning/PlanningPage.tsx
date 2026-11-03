@@ -34,6 +34,14 @@ import RequestPanel from "./RequestPanel";
 import SidePanel from "./SidePanel";
 
 type Notice = { kind: "info" | "error"; text: string } | null;
+
+/** F-41 : cible d'un clic dans le centre d'alertes. `nonce` change à chaque clic. */
+export interface PlanningFocus {
+  requestId: string | null;
+  assignmentId: string | null;
+  date: string | null;
+  nonce: number;
+}
 type PendingMove = { assignment: Assignment; period: Period } | null;
 type Panel = { kind: "assignment"; id: string } | { kind: "request"; id: string } | null;
 
@@ -52,7 +60,9 @@ export default function PlanningPage({
   isAdmin = true,
   onActivity,
   refreshToken = 0,
+  focus = null,
 }: {
+  focus?: PlanningFocus | null;
   today?: string;
   isAdmin?: boolean;
   /** change quand l'utilisateur revient sur le planning : rechargement des données */
@@ -75,11 +85,34 @@ export default function PlanningPage({
   const [pendingMove, setPendingMove] = useState<PendingMove>(null);
   const [pendingDrop, setPendingDrop] = useState<DropOfVignette | null>(null);
   const [pendingCancel, setPendingCancel] = useState<Assignment | null>(null);
+  // R-02 : confirmation d'un chevauchement ou d'une activité sur absence, renvoyée par l'API (428 « conflict »)
+  const [pendingConflict, setPendingConflict] = useState<{ message: string; retry: () => void } | null>(null);
   const [writeDates, setWriteDates] = useState(true);
   const [creating, setCreating] = useState<RequestFields | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const [scrollTo, setScrollTo] = useState<string | null>(null);
   const win = windowFor(anchor, zoom);
+
+  // F-41 : un clic sur une alerte amène à la barre ou à la vignette concernée
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.date && (focus.date < win.start || focus.date > win.end)) setAnchor(focus.date);
+    if (focus.assignmentId) {
+      setPanel({ kind: "assignment", id: focus.assignmentId });
+      setScrollTo(focus.assignmentId);
+    } else if (focus.requestId) setPanel({ kind: "request", id: focus.requestId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seul un nouveau clic déclenche la navigation
+  }, [focus?.nonce]);
+
+  useEffect(() => {
+    if (!scrollTo || !data?.assignments.some((a) => a.id === scrollTo)) return;
+    const el = document.querySelector(`[data-testid="bar-${scrollTo}"]`);
+    if (el) {
+      el.scrollIntoView?.({ block: "center", inline: "center", behavior: "smooth" });
+      setScrollTo(null);
+    }
+  }, [scrollTo, data]);
   const { dayWidth } = ZOOMS[zoom];
 
   const reloadPlanning = useCallback(async () => {
@@ -129,11 +162,12 @@ export default function PlanningPage({
       techById: new Map(technicians.map((t) => [t.id, t])),
       requests: new Map((data?.requests ?? []).map((r) => [r.id, r])),
       types: new Map(missionTypes.map((m) => [m.code, m])),
+      conflicts: new Map((data?.conflicts ?? []).map((c) => [c.assignment_id, c])),
     };
   }, [data, missionTypes, filters.technicianId, win.start, win.days, today]);
 
   // ------------------------------------------------------------------ F-07 : déplacement
-  const saveMove = async (a: Assignment, period: Period, confirm: boolean) => {
+  const saveMove = async (a: Assignment, period: Period, confirm: boolean, confirmConflict = false) => {
     setData(
       (d) =>
         d && {
@@ -150,6 +184,7 @@ export default function PlanningPage({
         start_date: period.start,
         end_date: period.end,
         confirm,
+        confirm_conflict: confirmConflict,
       });
       setNotice({
         kind: "info",
@@ -158,7 +193,9 @@ export default function PlanningPage({
           : `Activité déplacée. ${mailNote}`,
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 428) setPendingMove({ assignment: a, period });
+      if (err instanceof ApiError && err.status === 428 && err.code === "conflict")
+        setPendingConflict({ message: err.message, retry: () => void saveMove(a, period, confirm, true) });
+      else if (err instanceof ApiError && err.status === 428) setPendingMove({ assignment: a, period });
       else if (err instanceof ApiError && err.status === 409)
         setNotice({ kind: "error", text: "Le planning a été modifié par un autre utilisateur : il a été rechargé." });
       else setNotice({ kind: "error", text: err instanceof Error ? err.message : "Déplacement impossible." });
@@ -173,7 +210,12 @@ export default function PlanningPage({
   };
 
   // ------------------------------------------------------------------ R-03 : dépose d'une vignette
-  const createAssignment = async (drop: DropOfVignette, confirmDiffer: boolean, writeToRequest: boolean) => {
+  const createAssignment = async (
+    drop: DropOfVignette,
+    confirmDiffer: boolean,
+    writeToRequest: boolean,
+    confirmConflict = false,
+  ) => {
     const tech = derived.techById.get(drop.technicianId);
     try {
       await sendJson("POST", `/requests/${drop.vignette.id}/assignments`, {
@@ -183,13 +225,20 @@ export default function PlanningPage({
         end_date: drop.end,
         confirm_dates_differ: confirmDiffer,
         write_dates_to_request: writeToRequest,
+        confirm_conflict: confirmConflict,
       });
       setNotice({
         kind: "info",
         text: `${drop.vignette.ref} attribuée en brouillon à ${tech ? techName(tech) : "?"}, du ${formatDate(drop.start)} au ${formatDate(drop.end)}. ${mailNote}`,
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409)
+      if (err instanceof ApiError && err.status === 428 && err.code === "conflict")
+        setPendingConflict({
+          message: err.message,
+          retry: () => void createAssignment(drop, confirmDiffer, writeToRequest, true),
+        });
+      else if (err instanceof ApiError && err.status === 428) setPendingDrop(drop);
+      else if (err instanceof ApiError && err.status === 409)
         setNotice({ kind: "error", text: "La demande a été modifiée entre-temps : réessayez après le rechargement." });
       else setNotice({ kind: "error", text: err instanceof Error ? err.message : "Attribution impossible." });
     }
@@ -437,6 +486,7 @@ export default function PlanningPage({
                   setAbsenceDraft({ technician_id: technicianId, start_date: iso, end_date: iso, category: "leave" })
                 }
                 drag={dnd.drag}
+                conflicts={derived.conflicts}
               />
             )}
           </div>
@@ -451,6 +501,7 @@ export default function PlanningPage({
               onClose={() => setPanel(null)}
               onOpenRequest={(id) => setPanel({ kind: "request", id })}
               onRespond={(answer) => void respond(selectedAssignment, answer)}
+              conflict={derived.conflicts.get(selectedAssignment.id)}
               onCancel={() =>
                 needsConfirmation(selectedAssignment.status)
                   ? setPendingCancel(selectedAssignment)
@@ -507,6 +558,25 @@ export default function PlanningPage({
             const m = pendingMove;
             setPendingMove(null);
             void saveMove(m.assignment, m.period, true);
+          }}
+        />
+      )}
+
+      {pendingConflict && (
+        <ConfirmDialog
+          title="Conflit de planning"
+          message={
+            <>
+              <p>{pendingConflict.message}</p>
+              <p className="mt-2 text-xs text-slate-600">Le conflit restera signalé en rouge sur le planning tant qu'il existe.</p>
+            </>
+          }
+          confirmLabel="Placer quand même"
+          onCancel={() => setPendingConflict(null)}
+          onConfirm={() => {
+            const c = pendingConflict;
+            setPendingConflict(null);
+            c.retry();
           }}
         />
       )}
@@ -625,6 +695,12 @@ function Legend() {
       </span>
       <span>
         <span className={`${sw} bg-slate-400`} /> AB Absence
+      </span>
+      <span>
+        <span className="text-red-700">⛔</span> Conflit
+      </span>
+      <span>
+        <span className="text-amber-700">⚠</span> À surveiller
       </span>
     </div>
   );

@@ -1,6 +1,6 @@
 # Cahier des spécifications – Planning ATS et agent de gestion des demandes
 
-Version 0.4 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
+Version 0.5 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
 
 ## 0. Comment utiliser ce document
 
@@ -15,6 +15,8 @@ v0.2 (3 novembre 2026) : une période est désormais toujours exprimée par une 
 v0.3 (3 novembre 2026) : décisions de la phase 2. Déposer une vignette dans la période de la demande reprend les dates de la demande (R-03) ; modifier les dates d'une demande ne déplace pas ses affectations (F-14) ; retrait d'une affectation en brouillon ; fusion avec complément des champs vides et lien merged_into_id (F-15) ; champs attachment_url et merged_into_id ; GET /requests?view=buffer\|all.
 
 v0.4 (3 novembre 2026) : décisions de la phase 3. Le jeton est créé à l'envoi du mail et jamais stocké en clair (F-21, NF-02) ; une seule confirmation au demandeur par demande, mise à jour à chaque acceptation (F-23) ; un refus pose le badge « refusée par un technicien » (F-24) ; réponse manuelle possible aussi sur un brouillon (F-25) ; déplacer une proposition envoyée vers un autre technicien prépare un mail d'information à l'ancien (F-07) ; connecteur d'envoi fichier / SMTP (section 4) ; variables de modèles supplémentaires (F-52).
+
+v0.5 (3 novembre 2026) : décisions de la phase 4. Confirmation explicite d'un chevauchement ou d'une activité sur absence, à la dépose comme au déplacement (R-02) ; les conflits week-end et jour férié restent des voyants sur les barres sans entrer dans le centre d'alertes (R-05, F-40) ; calcul des jours ouvrés et date de référence de R-06 précisés ; centre d'alertes et réponses des techniciens réunis sous la cloche (F-40) ; paramètres d'alerte, dont la validité des liens (F-43).
 
 ## 1. Contexte et objectifs
 
@@ -140,15 +142,15 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 - **R-01** Statut d'une demande (calculé). to_assign : aucun assignment actif. partially_assigned : au moins un actif mais moins que technicians_needed. pending : tous les postes pourvus par des assignments actifs, dont au moins un en draft ou pending_response. confirmed : tous les postes sont accepted. cancelled : cancelled_at renseigné par décision de Philippe ; ce statut prime sur tous les autres. Un refus rend l'assignment inactif (refused, conservé) et la demande repasse en to_assign ou partially_assigned.
 
-- **R-02 Une activité par technicien et par jour.** La grille n'a qu'une ligne par technicien. Un chevauchement est autorisé uniquement après confirmation explicite et déclenche un conflit rouge (R-05).
+- **R-02** Une activité par technicien et par jour. La grille n'a qu'une ligne par technicien. Un chevauchement, ou une activité posée sur une absence, n'est autorisé qu'après confirmation explicite (« Placer quand même ») au moment de la dépose ou du déplacement, et déclenche un conflit rouge (R-05).
 
 - **R-03** Jours et périodes. Journées entières uniquement. Une demande et un assignment sont toujours définis par une date de début et une date de fin incluses ; il n'existe pas de nombre de jours saisi. Déposer une vignette datée sur un jour compris dans sa période crée un assignment couvrant exactement les dates de la demande. La déposer sur un jour hors de sa période décale la période à ce jour en gardant le même nombre de jours calendaires et demande une confirmation « dates différentes de la demande » ; la demande garde ses dates. Une demande sans dates complètes déposée sur le jour J crée un assignment de J à J, redimensionnable ; la confirmation propose (coché par défaut) d'écrire ces dates dans la demande.
 
 - **R-04 Calendrier.** Week-ends et jours fériés belges sont grisés. Une activité peut les couvrir (salons, tirs) sans blocage.
 
-- **R-05** Conflits. Rouge : chevauchement de deux activités d'un même technicien, ou activité sur une absence. Orange : activité sur week-end ou jour férié, modification de dates proposée sur une demande déjà attribuée, demande en attente de réponse depuis plus de N jours (paramètre, défaut 3), ou lien de réponse expiré (F-21). Un conflit est recalculé à chaque modification, jamais corrigé automatiquement.
+- **R-05** Conflits. Rouge : chevauchement de deux activités d'un même technicien, ou activité sur une absence. Orange : activité sur week-end ou jour férié, modification de dates proposée sur une demande déjà attribuée, demande en attente de réponse depuis plus de N jours calendaires (paramètre, défaut 3), ou lien de réponse expiré (F-21). Un conflit est recalculé à chaque lecture, en tenant compte des activités voisines même hors de la fenêtre affichée, et n'est jamais corrigé automatiquement. Les conflits week-end et jour férié sont affichés sur les barres mais ne figurent pas dans le centre d'alertes, pour ne pas le noyer (salons et tirs les couvrent souvent).
 
-- **R-06** Alerte d'attribution. Une demande to_assign ou partially_assigned dont start_date est dans moins de alert_orange_days jours ouvrés (défaut 10) passe en orange, et dans moins de alert_red_days (défaut 5) en rouge \[Q-03\]. Sans start_date, la date de référence est needed_by si elle existe ; sinon il n'y a pas d'alerte de date, seulement l'icône « informations manquantes ».
+- **R-06** Alerte d'attribution. Une demande to_assign ou partially_assigned dont start_date est dans moins de alert_orange_days jours ouvrés (défaut 10) passe en orange, et dans moins de alert_red_days (défaut 5) en rouge \[Q-03\]. Les jours ouvrés se comptent de demain jusqu'à la date de début incluse, hors week-ends et jours fériés belges ; une demande déjà commencée est rouge (« déjà commencée »), une demande terminée n'a plus d'alerte. Sans start_date, la date de référence est needed_by si elle existe ; sinon il n'y a pas d'alerte de date, seulement l'icône « informations manquantes ».
 
 - **R-07 Jamais de décision silencieuse.** Toute création par l'agent est marquée needs_review = true. Toute modification ou annulation détectée est une change_request en attente.
 
@@ -224,13 +226,13 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 ### 8.5 Alertes et conflits (F-40 à F-43)
 
-- **F-40** Centre d'alertes (cloche) listant : dates proches non attribuées, conflits, réponses refusées, réponses en attente depuis trop longtemps, changements en attente, activités remises dans le tampon.
+- **F-40** Centre d'alertes (cloche) listant : dates proches non attribuées, conflits, réponses refusées, réponses en attente depuis trop longtemps et liens expirés, changements en attente, activités remises dans le tampon. Les alertes rouges sont en tête. Un second onglet de la cloche regroupe les réponses des techniciens (F-23, F-24). Le compteur distingue rouges (⛔) et oranges (⚠).
 
 - **F-41** Chaque alerte renvoie en un clic vers la vignette ou la barre concernée et disparaît quand la cause disparaît.
 
 - **F-42** Pas de notifications externes en V1.
 
-- **F-43** Paramètres d'alerte modifiables par Philippe (R-05, R-06).
+- **F-43** Paramètres d'alerte modifiables par Philippe (R-05, R-06) : seuils orange et rouge en jours ouvrés (le rouge doit être inférieur à l'orange), délai d'attente d'une réponse, validité des liens de réponse.
 
 ### 8.6 Mails à valider (F-50 à F-52)
 
@@ -425,7 +427,7 @@ Chaque phase doit être utilisable et testée avant la suivante. À la fin de ch
 
 Les phases 1 à 4 ne dépendent d'aucune autorisation IT : elles peuvent démarrer immédiatement, pendant que la demande d'accès Microsoft (Q-01, Q-10) est traitée.
 
-**État au 3 novembre 2026** : phases 0 à 3 réalisées (socle ; planning et absences manuelles ; tampon, vignettes, fiche, fusion et division ; attribution par mail : brouillons, mails à valider, liens de réponse, réponses manuelles, annulation, modèles, notifications). Reporté volontairement : voyants de conflit F-08, alertes R-05 et R-06 dont « lien expiré » (phase 4) ; application des changements en attente, R-08 à R-10 (phase 6). Reste à brancher l'OIDC réel \[Q-15\] et le connecteur Microsoft d'envoi \[Q-01\].
+**État au 3 novembre 2026** : phases 0 à 4 réalisées (socle ; planning et absences manuelles ; tampon, vignettes, fiche, fusion et division ; attribution par mail et réponses ; conflits R-05, alertes R-06, voyants F-08, centre d'alertes F-40 à F-43, confirmation des chevauchements R-02). Reporté volontairement : application ou rejet des changements en attente, R-08 à R-10, absences IRH (phase 6) ; agent (phase 5). Reste à brancher l'OIDC réel \[Q-15\] et le connecteur Microsoft d'envoi \[Q-01\].
 
 ### 15.1 Conseils pour le vibe coding
 

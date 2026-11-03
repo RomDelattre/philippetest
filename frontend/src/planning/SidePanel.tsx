@@ -1,6 +1,6 @@
 // F-05 : fiche de l'activité dans un panneau latéral. La fiche complète de la demande (F-14) vient en phase 2.
 import { useEffect, useState } from "react";
-import type { Assignment, MissionType, RequestSummary, Technician } from "../api";
+import type { Assignment, AssignmentConflicts, MissionType, RequestSummary, Technician } from "../api";
 import { formatDate, periodDays } from "../dates";
 import { dangerBtn, primaryBtn, secondaryBtn } from "./Dialogs";
 import { techName } from "./Grid";
@@ -31,6 +31,7 @@ export default function SidePanel(props: {
   onOpenRequest: (requestId: string) => void;
   onRespond: (answer: "accept" | "refuse") => void;
   onCancel: () => void;
+  conflict?: AssignmentConflicts;
 }) {
   const { assignment: a, request: r } = props;
   const [form, setForm] = useState<Period>({ technicianId: a.technician_id, start: a.start_date, end: a.end_date });
@@ -68,6 +69,15 @@ export default function SidePanel(props: {
         </button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-sm">
+        {props.conflict && (
+          <ul className="space-y-1" aria-label="Conflits">
+            {props.conflict.items.map((c) => (
+              <li key={c.code + c.message} className={`rounded px-2 py-1 ${c.level === "red" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900"}`}>
+                {c.level === "red" ? "⛔" : "⚠"} {c.message}
+              </li>
+            ))}
+          </ul>
+        )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           {rows
             .filter(([, v]) => v)

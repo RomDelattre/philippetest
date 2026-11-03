@@ -25,6 +25,13 @@ export function VignetteCard({
   });
   const dated = v.start_date && v.end_date;
   const icons: { key: string; icon: string; label: string; tone: string }[] = [];
+  if (v.date_alert)
+    icons.push({
+      key: "date",
+      icon: "⏰",
+      label: v.working_days_left ? `Date proche : ${v.working_days_left} j ouvré(s)` : "Date dépassée ou imminente",
+      tone: v.date_alert === "red" ? "bg-red-600 text-white" : "bg-amber-300 text-slate-900",
+    });
   if (v.needs_review) icons.push({ key: "review", icon: "⚑", label: "À vérifier", tone: "bg-amber-100 text-amber-900" });
   if (v.pending_changes.includes("modification"))
     icons.push({ key: "mod", icon: "✎", label: "Modification en attente", tone: "bg-sky-100 text-sky-900" });

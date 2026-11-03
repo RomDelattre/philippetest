@@ -16,3 +16,9 @@ def not_found(what: str) -> HTTPException:
 
 def unprocessable(message: str) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
+
+
+def precondition(code: str, message: str) -> HTTPException:
+    """428 : l'action demande une confirmation explicite. `code` indique laquelle au front :
+    confirm_sent (F-07, F-26), dates_differ (R-03), conflict (R-02)."""
+    return HTTPException(status.HTTP_428_PRECONDITION_REQUIRED, {"code": code, "message": message})

@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.api import outbox, planning, requests, respond
+from app.api import alerts, outbox, planning, requests, respond
 from app.api.routes import router
 from app.config import get_settings
 
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(requests.router)
     app.include_router(outbox.router)
     app.include_router(respond.router)
+    app.include_router(alerts.router)
     return app
 
 

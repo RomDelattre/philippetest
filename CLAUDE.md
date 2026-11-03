@@ -1,6 +1,6 @@
 # Planning ATS – consignes pour l'agent de code
 
-Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.4,
+Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.5,
 original Word dans `docs/`). Chaque exigence a un identifiant (F-xx, R-xx, NF-xx, Q-xx) :
 cite-les dans les commits, les tests et les commentaires quand c'est utile.
 
@@ -95,7 +95,15 @@ Bearer validé par JWKS). L'utilisateur doit exister dans `users` (rôles `admin
   `PATCH /assignments/{id}` `response`) ; modèles `GET/PUT /settings/mail-templates` ; notifications.
   Front : `outbox/OutboxPage.tsx`, cloche et navigation dans `App.tsx`, actions dans `SidePanel.tsx`.
   Limite connue : après une division, la 2e moitié d'une proposition en attente n'a pas de lien propre.
-- Prochaine étape : phase 4 (conflits et alertes : F-40 à F-43, F-08, R-05, R-06, dont « lien expiré »).
+- Phase 4 : faite. Règles pures `app/rules/conflicts.py` (R-05, R-06, jours ouvrés) ; assemblage depuis la
+  base `app/services/alerts.py` (`conflicts_for` tient compte des voisins hors fenêtre,
+  `placement_conflicts` pour R-02, `compute_alerts` pour F-40) ; `GET /planning` renvoie `conflicts` ;
+  vignettes `date_alert` / `working_days_left` ; `GET /alerts`, `GET/PUT /settings/alerts` (F-43, admin).
+  Un 428 porte `detail = {code, message}` avec `code` = `confirm_sent` | `dates_differ` | `conflict`
+  (le front renvoie avec `confirm`, `confirm_dates_differ` ou `confirm_conflict`).
+  Front : `alerts/AlertCenter.tsx` (cloche : alertes + réponses, paramètres), voyants ⛔/⚠ sur les barres,
+  navigation depuis une alerte (`PlanningFocus`). Week-end et férié : voyant seulement, hors centre d'alertes.
+- Prochaine étape : phase 5 (agent mail en mode simulation puis branché : F-60 à F-63, F-67 à F-69).
 
 ## Mails et liens de réponse
 

@@ -5,6 +5,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** code de confirmation d'un 428 : confirm_sent, dates_differ, conflict */
+    public code: string | null = null,
   ) {
     super(message);
   }
@@ -26,14 +28,18 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, { ...init, headers });
   if (!res.ok) {
     let detail: string = res.statusText;
+    let code: string | null = null;
     try {
       const raw = (await res.json()).detail;
       if (Array.isArray(raw)) detail = raw.map((d) => String(d.msg ?? d)).join(" ; ");
-      else if (raw) detail = String(raw);
+      else if (raw && typeof raw === "object") {
+        detail = String(raw.message ?? detail);
+        code = raw.code ?? null;
+      } else if (raw) detail = String(raw);
     } catch {
       /* corps non JSON */
     }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, code);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -127,6 +133,32 @@ export interface Planning {
   requests: RequestSummary[];
   absences: Absence[];
   holidays: Holiday[];
+  conflicts?: AssignmentConflicts[];
+}
+
+export type Level = "red" | "orange";
+export interface AssignmentConflicts {
+  assignment_id: string;
+  level: Level;
+  items: { level: Level; code: string; message: string }[];
+}
+
+export interface Alert {
+  key: string;
+  level: Level;
+  kind: string;
+  message: string;
+  request_id: string | null;
+  request_ref: string | null;
+  assignment_id: string | null;
+  date: string | null;
+}
+
+export interface AlertSettings {
+  alert_orange_days: number;
+  alert_red_days: number;
+  pending_response_alert_days: number;
+  token_validity_days: number;
 }
 
 export type ChangeKind = "modification" | "cancellation";
@@ -151,6 +183,8 @@ export interface Vignette {
   pending_changes: ChangeKind[];
   origin: "mail" | "teams" | "sharepoint" | "manual";
   date_flexible: boolean;
+  date_alert?: "red" | "orange" | null;
+  working_days_left?: number | null;
   version: number;
 }
 
