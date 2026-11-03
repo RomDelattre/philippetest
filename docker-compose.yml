@@ -64,4 +64,5 @@ volumes:
 
 secrets:
   extra_ca:
-    file: ${EXTRA_CA_FILE:-/dev/null}
+    # fichier vide par défaut : fonctionne aussi sous Windows, contrairement à /dev/null
+    file: ${EXTRA_CA_FILE:-./docker/no-extra-ca.pem}
