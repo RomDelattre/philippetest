@@ -1,6 +1,6 @@
 # Cahier des spécifications – Planning ATS et agent de gestion des demandes
 
-Version 0.2 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
+Version 0.3 – 3 novembre 2026 – Document de référence pour le développement (vibe coding)
 
 ## 0. Comment utiliser ce document
 
@@ -11,6 +11,8 @@ Ce document est la source de vérité du projet. Chaque exigence a un identifian
 v0.1 (3 novembre 2026) : première version.
 
 v0.2 (3 novembre 2026) : une période est désormais toujours exprimée par une date de début et une date de fin (suppression de days_count partout) ; liens de réponse en deux temps (GET affiche, POST enregistre) ; correction des exceptions de P1 ; définition de l'assignment actif ; ajout des tables users, mission_types, absence_proposals et notifications ; conservation temporaire du corps des mails ; précisions sur le déplacement (F-07), l'expiration des jetons (F-21), la fusion et la division (F-15) ; coquilles corrigées.
+
+v0.3 (3 novembre 2026) : décisions de la phase 2. Déposer une vignette dans la période de la demande reprend les dates de la demande (R-03) ; modifier les dates d'une demande ne déplace pas ses affectations (F-14) ; retrait d'une affectation en brouillon ; fusion avec complément des champs vides et lien merged_into_id (F-15) ; champs attachment_url et merged_into_id ; GET /requests?view=buffer\|all.
 
 ## 1. Contexte et objectifs
 
@@ -102,7 +104,7 @@ Toutes les tables ont id (UUID), created_at, updated_at et version (verrouillage
 
 - **technicians** : last_name, first_name, email, role (mechanic ou electronician), active, sort_order. Les noms réels remplacent les noms anonymisés (A, B, C) via un script de seed.
 
-- requests (la vignette) : ref lisible (ex. D-2026-0042), type_code (MI, SD, AT, FI_FE, TI_TE, nullable tant que non défini), title, requester_name, requester_email, cf, client, location, objective, technicians_needed, start_date, end_date, date_flexible (booléen), flex_justification, comments, products (JSON : produit, munitions, commentaire), status, cancelled_at, cancelled_by, missing_fields (JSON), needs_review (booléen), badges (JSON : dates modifiées, technicien absent), origin (mail, teams, sharepoint, manual), confidence, requested_at, needed_by. Il n'y a pas de champ nombre de jours : le nombre de jours affiché est calculé (end_date − start_date + 1, jours calendaires) et n'est jamais stocké. start_date et end_date sont nullables tant qu'elles ne sont pas connues ; si les deux sont renseignées, end_date ≥ start_date. status est stocké pour le filtrage mais n'est écrit que par la fonction de calcul R-01 du backend.
+- requests (la vignette) : ref lisible (ex. D-2026-0042), type_code (MI, SD, AT, FI_FE, TI_TE, nullable tant que non défini), title, requester_name, requester_email, cf, client, location, objective, technicians_needed, start_date, end_date, date_flexible (booléen), flex_justification, comments, products (JSON : produit, munitions, commentaire), status, cancelled_at, cancelled_by, missing_fields (JSON), needs_review (booléen), badges (JSON : dates modifiées, technicien absent), origin (mail, teams, sharepoint, manual), confidence, requested_at, needed_by, attachment_url (lien de pièce jointe, F-12), merged_into_id (demande conservée après une fusion, F-15). Il n'y a pas de champ nombre de jours : le nombre de jours affiché est calculé (end_date − start_date + 1, jours calendaires) et n'est jamais stocké. start_date et end_date sont nullables tant qu'elles ne sont pas connues ; si les deux sont renseignées, end_date ≥ start_date. status est stocké pour le filtrage mais n'est écrit que par la fonction de calcul R-01 du backend.
 
 - assignments : request_id, technician_id, start_date, end_date (obligatoires, end_date ≥ start_date), status (draft, pending_response, accepted, refused, cancelled), response_token_hash, token_expires_at, token_used_at, proposed_at, responded_at, partner_electronician_id (nullable, pour le binôme).
 
@@ -138,7 +140,7 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 - **R-02 Une activité par technicien et par jour.** La grille n'a qu'une ligne par technicien. Un chevauchement est autorisé uniquement après confirmation explicite et déclenche un conflit rouge (R-05).
 
-- **R-03** Jours et périodes. Journées entières uniquement. Une demande et un assignment sont toujours définis par une date de début et une date de fin incluses ; il n'existe pas de nombre de jours saisi. Par défaut, déposer une vignette crée un assignment couvrant exactement les dates de la demande. Déposer sur une autre colonne décale la période en gardant le même nombre de jours calendaires et demande une confirmation « dates différentes de la demande ». Une demande sans dates complètes déposée sur le jour J crée un assignment de J à J, redimensionnable ; à la validation, l'application propose d'écrire ces dates dans la demande.
+- **R-03** Jours et périodes. Journées entières uniquement. Une demande et un assignment sont toujours définis par une date de début et une date de fin incluses ; il n'existe pas de nombre de jours saisi. Déposer une vignette datée sur un jour compris dans sa période crée un assignment couvrant exactement les dates de la demande. La déposer sur un jour hors de sa période décale la période à ce jour en gardant le même nombre de jours calendaires et demande une confirmation « dates différentes de la demande » ; la demande garde ses dates. Une demande sans dates complètes déposée sur le jour J crée un assignment de J à J, redimensionnable ; la confirmation propose (coché par défaut) d'écrire ces dates dans la demande.
 
 - **R-04 Calendrier.** Week-ends et jours fériés belges sont grisés. Une activité peut les couvrir (salons, tirs) sans blocage.
 
@@ -190,9 +192,9 @@ Un assignment est **actif** quand son statut est draft, pending_response ou acce
 
 - **F-13** Les informations minimales obligatoires pour considérer une demande complète sont : type, nombre de techniciens, date de début, date de fin, lieu **\[Q-06\]**. Les champs manquants sont listés dans missing_fields et affichés ; leur absence n'empêche jamais l'attribution.
 
-- **F-14** Fiche détaillée : tous les champs éditables, historique des événements, messages sources avec lien vers le mail ou le message d'origine, assignments, conflits, changements en attente.
+- **F-14** Fiche détaillée : tous les champs éditables, historique des événements, messages sources avec lien vers le mail ou le message d'origine, assignments, conflits, changements en attente. Modifier les dates d'une demande ne déplace jamais ses assignments (P1) : ils se déplacent sur le planning. Un assignment en brouillon (jamais envoyé) peut être retiré depuis la fiche ; il passe en cancelled et reste dans l'historique. Le nombre de techniciens ne peut pas descendre sous le nombre d'assignments actifs.
 
-- **F-15** Fusion de deux vignettes (doublons détectés ou non) et division d'une demande en deux périodes. Fusion : Philippe choisit la demande conservée ; l'autre est annulée et ses messages sources, son historique et ses assignments actifs sont rattachés à la demande conservée ; la fusion est refusée si le nombre d'assignments actifs dépasse alors technicians_needed. Division : à une date de coupure ; chaque assignment est rattaché à la partie qu'il recouvre ; un assignment à cheval est coupé en deux assignments de même technicien et même statut, sans nouveau mail.
+- **F-15** Fusion de deux vignettes (doublons détectés ou non) et division d'une demande en deux périodes. Fusion : Philippe choisit la demande conservée ; l'autre est annulée (merged_into_id pointe vers la conservée) et ses messages sources et ses assignments actifs sont rattachés à la demande conservée, dont les champs vides sont complétés ; la fusion est refusée si le nombre d'assignments actifs dépasse alors technicians_needed ou si un même technicien est affecté aux deux. Division : à une date de coupure (premier jour de la seconde partie) ; chaque assignment est rattaché à la partie qu'il recouvre ; un assignment à cheval est coupé en deux assignments de même technicien et même statut, sans nouveau mail.
 
 ### 8.3 Attribution (F-20 à F-26)
 
@@ -339,9 +341,9 @@ Préfixe /api, JSON, authentification obligatoire sauf /api/respond/{token} et /
 
 - GET /planning?from=&to= : techniciens, assignments, absences, jours fériés, conflits calculés.
 
-- GET/POST /requests, GET/PATCH/DELETE /requests/{id}, POST /requests/{id}/merge, POST /requests/{id}/split.
+- GET /requests?view=buffer\|all (vignettes), POST /requests, GET/PATCH /requests/{id}, POST /requests/{id}/merge, POST /requests/{id}/split.
 
-- POST /requests/{id}/assignments (attribution), PATCH /assignments/{id} (déplacement, réponse manuelle), DELETE /assignments/{id}.
+- POST /requests/{id}/assignments (attribution, R-03), PATCH /assignments/{id} (déplacement, réponse manuelle), DELETE /assignments/{id} (retrait d'un brouillon ; l'annulation d'une proposition envoyée relève de F-26).
 
 - GET /respond/{token}?answer=accept\|refuse : page de confirmation, sans effet. POST /respond/{token} (corps : answer) : enregistre la réponse.
 
@@ -421,7 +423,7 @@ Chaque phase doit être utilisable et testée avant la suivante. À la fin de ch
 
 Les phases 1 à 4 ne dépendent d'aucune autorisation IT : elles peuvent démarrer immédiatement, pendant que la demande d'accès Microsoft (Q-01, Q-10) est traitée.
 
-**État au 3 novembre 2026** : phase 0 réalisée (Docker Compose, PostgreSQL, migration initiale de toutes les tables de la section 6, authentification dev / proxy / OIDC, seed, CLAUDE.md). Phase 1 réalisée (planning F-01 à F-07, glisser-déposer et redimensionnement, absences manuelles F-31). Reporté volontairement : la préparation du nouveau mail lors d’un déplacement (F-07 → F-20) arrive avec la boîte d’envoi en phase 3 ; l’application de R-09 aux absences (F-32) arrive en phase 6 ; les voyants de conflit (F-08) en phase 4. Reste à brancher l’OIDC réel \[Q-15\].
+**État au 3 novembre 2026** : phases 0, 1 et 2 réalisées (socle ; planning F-01 à F-07 et absences manuelles F-31 ; tampon, vignettes, formulaire, fiche, fusion et division F-10 à F-15, attribution par glisser-déposer R-03). Reporté volontairement : brouillons de mail (F-07 et F-20 → phase 3) ; voyants de conflit F-08 et icône « date proche » R-06 (phase 4) ; application ou rejet des changements en attente et R-09 (phase 6). Reste à brancher l'OIDC réel \[Q-15\].
 
 ### 15.1 Conseils pour le vibe coding
 

@@ -1,18 +1,7 @@
-// Grille de planning : techniciens en lignes, jours en colonnes (F-01 à F-04), glisser-déposer (F-07).
-import {
-  DndContext,
-  type CollisionDetection,
-  type DragEndEvent,
-  type DragMoveEvent,
-  PointerSensor,
-  pointerWithin,
-  rectIntersection,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import { memo, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
+// Grille de planning : techniciens en lignes, jours en colonnes (F-01 à F-04).
+// Le contexte de glisser-déposer (F-07, R-03) est fourni par PlanningPage via dnd.ts.
+import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { memo, type CSSProperties, type MouseEvent } from "react";
 import type { Absence, Assignment, MissionType, RequestSummary, Technician } from "../api";
 import { formatDate, WEEKDAY_INITIALS, weekdayIndex } from "../dates";
 import {
@@ -20,7 +9,6 @@ import {
   ASSIGNMENT_STATUS_LABELS,
   type DayInfo,
   type DragKind,
-  dragResult,
   type Filters,
   filtersActive,
   matchesFilters,
@@ -48,57 +36,27 @@ export interface GridProps {
   onSelect: (assignmentId: string) => void;
   onAbsenceClick: (absence: Absence) => void;
   onEmptyClick: (technicianId: string, iso: string) => void;
-  onDrop: (assignment: Assignment, period: Period) => void;
+  /** Aperçu du glisser-déposer en cours (déplacement d'une barre ou dépose d'une vignette). */
+  drag: GridDrag | null;
 }
 
-interface DragState {
-  assignment: Assignment;
-  kind: DragKind;
+export interface GridDrag {
+  sourceAssignmentId: string | null;
   preview: Period;
 }
-
-const collision: CollisionDetection = (args) => {
-  const hits = pointerWithin(args);
-  return hits.length ? hits : rectIntersection(args);
-};
 
 export function techName(t: Technician): string {
   return [t.first_name, t.last_name].filter(Boolean).join(" ");
 }
 
 export default function Grid(props: GridProps) {
-  const { days, dayWidth, assignments } = props;
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const { days, dayWidth } = props;
   const windowStart = days[0].iso;
   const totalWidth = NAME_WIDTH + days.length * dayWidth;
   const columns = `repeat(${days.length}, ${dayWidth}px)`;
 
-  const byId = useMemo(() => new Map(assignments.map((a) => [a.id, a])), [assignments]);
-
-  const compute = (e: DragMoveEvent | DragEndEvent): DragState | null => {
-    const data = e.active.data.current as { kind: DragKind; assignmentId: string } | undefined;
-    const a = data && byId.get(data.assignmentId);
-    if (!data || !a) return null;
-    const dayDelta = Math.round(e.delta.x / dayWidth);
-    const overId = e.over?.id ? String(e.over.id) : "";
-    const target = overId.startsWith("lane:") ? overId.slice(5) : undefined;
-    const base = { technicianId: a.technician_id, start: a.start_date, end: a.end_date };
-    return { assignment: a, kind: data.kind, preview: dragResult(data.kind, base, dayDelta, target) };
-  };
-
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={collision}
-      onDragMove={(e) => setDrag(compute(e))}
-      onDragCancel={() => setDrag(null)}
-      onDragEnd={(e) => {
-        const result = compute(e);
-        setDrag(null);
-        if (result) props.onDrop(result.assignment, result.preview);
-      }}
-    >
+    <>
       <div className="relative" style={{ width: totalWidth }}>
         <Header days={days} dayWidth={dayWidth} columns={columns} />
         <div className="relative">
@@ -109,7 +67,7 @@ export default function Grid(props: GridProps) {
             </p>
           )}
           {props.mechanics.map((t) => (
-            <Row key={t.id} tech={t} droppable {...props} windowStart={windowStart} columns={columns} drag={drag} />
+            <Row key={t.id} tech={t} droppable {...props} windowStart={windowStart} columns={columns} />
           ))}
           {props.electronicians.length > 0 && (
             <>
@@ -127,14 +85,13 @@ export default function Grid(props: GridProps) {
                   {...props}
                   windowStart={windowStart}
                   columns={columns}
-                  drag={drag}
                 />
               ))}
             </>
           )}
         </div>
       </div>
-    </DndContext>
+    </>
   );
 }
 
@@ -215,7 +172,6 @@ interface RowProps extends GridProps {
   droppable: boolean;
   windowStart: string;
   columns: string;
-  drag: DragState | null;
 }
 
 function Row(p: RowProps) {
@@ -249,6 +205,7 @@ function Row(p: RowProps) {
         ref={setNodeRef}
         onClick={onLaneClick}
         data-testid={`lane-${tech.id}`}
+        data-lane={tech.id}
         className={`relative grid cursor-cell ${isOver ? "bg-sky-50/70" : ""}`}
         style={{ gridTemplateColumns: columns, gridTemplateRows: "1fr" }}
       >
@@ -281,7 +238,7 @@ function Row(p: RowProps) {
               type={req?.type_code ? p.missionTypes.get(req.type_code) : undefined}
               dimmed={hasFilter && !matchesFilters(a, req, p.filters)}
               selected={p.selectedId === a.id}
-              dragging={drag?.assignment.id === a.id}
+              dragging={drag?.sourceAssignmentId === a.id}
               onSelect={p.onSelect}
             />
           );

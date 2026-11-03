@@ -4,7 +4,7 @@ Application web interne qui remplace le planning Excel des techniciens : grille 
 zone tampon « À attribuer », attribution par mail avec validation humaine, absences issues des
 mails IRH, alertes, et agent d'ingestion (mail, Teams, SharePoint) branché sur un modèle d'IA interne.
 
-- Spécifications : [`docs/specifications.md`](docs/specifications.md) (v0.2)
+- Spécifications : [`docs/specifications.md`](docs/specifications.md) (v0.3)
 - Consignes de développement : [`CLAUDE.md`](CLAUDE.md)
 
 ## Démarrage rapide (Docker)

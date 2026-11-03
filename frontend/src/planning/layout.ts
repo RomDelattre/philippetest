@@ -169,3 +169,45 @@ export const ASSIGNMENT_STATUS_LABELS: Record<AssignmentStatus, string> = {
   refused: "Refusé",
   cancelled: "Annulé",
 };
+
+// --------------------------------------------------------------------------- vignettes (F-11, R-03)
+
+/** R-03 : période créée en déposant une vignette sur le jour `day` (miroir de app/rules/requests.py). */
+export function placementForDrop(
+  reqStart: string | null,
+  reqEnd: string | null,
+  day: string,
+): { start: string; end: string; differsFromRequest: boolean; requestDatesIncomplete: boolean } {
+  if (!reqStart || !reqEnd) return { start: day, end: day, differsFromRequest: false, requestDatesIncomplete: true };
+  if (reqStart <= day && day <= reqEnd)
+    return { start: reqStart, end: reqEnd, differsFromRequest: false, requestDatesIncomplete: false };
+  return { start: day, end: addDays(day, diffDays(reqStart, reqEnd)), differsFromRequest: true, requestDatesIncomplete: false };
+}
+
+export const FIELD_LABELS: Record<string, string> = {
+  type_code: "type",
+  technicians_needed: "nombre de techniciens",
+  start_date: "date de début",
+  end_date: "date de fin",
+  location: "lieu",
+};
+
+export const BADGE_LABELS: Record<string, string> = {
+  dates_modified: "Dates modifiées",
+  technician_absent: "Technicien absent",
+};
+
+export const REQUEST_STATUS_LABELS: Record<string, string> = {
+  to_assign: "À attribuer",
+  partially_assigned: "Partiellement attribuée",
+  pending: "En attente de réponse",
+  confirmed: "Confirmée",
+  cancelled: "Annulée",
+};
+
+export const ORIGIN_LABELS: Record<string, string> = {
+  mail: "Mail",
+  teams: "Teams",
+  sharepoint: "SharePoint",
+  manual: "Saisie manuelle",
+};

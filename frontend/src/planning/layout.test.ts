@@ -102,3 +102,23 @@ describe("contraste", () => {
     expect(readableText("#fde68a")).toBe("#111827");
   });
 });
+
+import { placementForDrop } from "./layout";
+
+describe("dépose d'une vignette (R-03)", () => {
+  it("colle aux dates de la demande quand on dépose dans sa période", () => {
+    expect(placementForDrop("2026-11-09", "2026-11-13", "2026-11-11")).toEqual({
+      start: "2026-11-09", end: "2026-11-13", differsFromRequest: false, requestDatesIncomplete: false,
+    });
+  });
+  it("décale en gardant la durée hors période", () => {
+    expect(placementForDrop("2026-11-09", "2026-11-13", "2026-11-23")).toMatchObject({
+      start: "2026-11-23", end: "2026-11-27", differsFromRequest: true,
+    });
+  });
+  it("crée un jour unique pour une demande sans dates", () => {
+    expect(placementForDrop(null, null, "2026-11-23")).toMatchObject({
+      start: "2026-11-23", end: "2026-11-23", requestDatesIncomplete: true,
+    });
+  });
+});

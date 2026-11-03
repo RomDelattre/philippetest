@@ -1,6 +1,6 @@
 # Planning ATS – consignes pour l'agent de code
 
-Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.2,
+Source de vérité : `docs/specifications.md` (export du cahier des spécifications v0.3,
 original Word dans `docs/`). Chaque exigence a un identifiant (F-xx, R-xx, NF-xx, Q-xx) :
 cite-les dans les commits, les tests et les commentaires quand c'est utile.
 
@@ -80,11 +80,21 @@ Bearer validé par JWKS). L'utilisateur doit exister dans `users` (rôles `admin
   (`backend/app/api/planning.py`) ; grille `frontend/src/planning/` (calculs purs dans `layout.ts`).
   Reporté : nouveau mail après déplacement (F-07 → F-20, phase 3), R-09 sur absence (F-32, phase 6),
   voyants de conflit (F-08, phase 4).
-- Prochaine étape : phase 2 (tampon, vignettes, formulaire manuel, F-10 à F-15).
+- Phase 2 : faite. API `backend/app/api/requests.py` : `GET /requests?view=buffer|all`, `POST/GET/PATCH
+  /requests/{id}`, `POST /requests/{id}/assignments` (R-03, 428 si dates différentes), `DELETE
+  /assignments/{id}` (brouillon seulement), `POST /requests/{id}/merge|split` ; règles pures
+  `app/rules/requests.py` ; migration 0002 (`attachment_url`, `merged_into_id`).
+  Front : `Buffer.tsx`, `RequestForm.tsx`, `RequestPanel.tsx`, `dnd.ts`.
+  Reporté : brouillon de mail à l'attribution (F-20, phase 3), icône « date proche » (R-06, phase 4),
+  traitement des changements en attente (phase 6). Les chevauchements ne sont pas encore signalés (phase 4).
+- Prochaine étape : phase 3 (attribution par mail, boîte d'envoi, jetons, réponses : F-20 à F-26, F-50 à F-52).
 
 ## Repères front
 
-- Glisser-déposer : `@dnd-kit/core`, une barre = poignée début + corps (déplacement) + poignée fin.
+- Glisser-déposer : `@dnd-kit/core`, contexte unique dans `PlanningPage` (hook `usePlanningDnd`, `dnd.ts`).
+  Une barre = poignée début + corps (déplacement) + poignée fin ; une vignette du tampon = `new:<id>`.
   Pas de transformation visuelle : un aperçu (`drag-preview`) est dessiné dans la ligne cible.
+  Le jour de dépose d'une vignette se calcule avec la position réelle du pointeur et de la ligne
+  (`data-lane`) : les rectangles mémorisés par dnd-kit se décalent quand une zone défile.
 - Le panneau latéral offre l'alternative clavier au glisser-déposer (technicien, début, fin).
 - Toute écriture envoie `version` ; 409 → message et rechargement ; 428 → dialogue de confirmation.

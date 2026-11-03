@@ -37,9 +37,28 @@ const base: Record<string, unknown> = {
   "/api/health": { status: "ok", database: "ok", auth_mode: "dev" },
   "/api/me": { id: "1", email: "olivier@example.local", display_name: "Olivier", role: "planner" },
   "/api/planning": planning,
+  "/api/requests": [
+    { id: "r3", ref: "D-2026-0003", type_code: "SD", title: "Salon Eurosatory", requester_name: "Chef C", client: "Client C",
+      cf: null, location: null, start_date: "2026-11-23", end_date: "2026-11-27", technicians_needed: 2, remaining: 2,
+      status: "to_assign", needs_review: true, missing_fields: ["location"], badges: ["technician_absent"],
+      pending_changes: ["modification"], origin: "mail", date_flexible: false, version: 1 },
+  ],
+  "/api/requests/r3": {
+    id: "r3", ref: "D-2026-0003", type_code: "SD", title: "Salon Eurosatory", requester_name: "Chef C",
+    requester_email: null, cf: null, client: "Client C", location: null, objective: null, technicians_needed: 2,
+    start_date: "2026-11-23", end_date: "2026-11-27", date_flexible: false, flex_justification: null, comments: null,
+    products: [], needed_by: null, attachment_url: null, status: "to_assign", needs_review: true,
+    missing_fields: ["location"], badges: [], origin: "mail", confidence: 0.82, requested_at: null, cancelled_at: null,
+    merged_into_ref: null, remaining: 2, version: 4, assignments: [],
+    sources: [{ id: "s1", source: "mail", received_at: "2026-11-02T08:00:00Z", sender: "chef.c@example.local",
+      subject: "Salon", body_excerpt: null, web_link: "https://outlook.example.local/s1" }],
+    pending_changes: [], history: [{ created_at: "2026-11-02T08:01:00Z", actor: "agent", action: "request.create",
+      entity_type: "requests", before: null, after: null }],
+  },
   "/api/mission-types": [
     { code: "MI", label: "Mission", color: "#2563eb", sort_order: 0 },
     { code: "AT", label: "Atelier", color: "#059669", sort_order: 2 },
+    { code: "SD", label: "Salon / démo", color: "#9333ea", sort_order: 1 },
   ],
 };
 
@@ -131,5 +150,81 @@ describe("PlanningPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       technician_id: "t1", start_date: "2026-11-03", end_date: "2026-11-03", category: "leave",
     });
+  });
+});
+
+describe("Zone tampon et vignettes (phase 2)", () => {
+  it("affiche les vignettes avec leurs indicateurs (F-10, F-11)", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PlanningPage today="2026-11-04" />);
+    const card = await screen.findByTestId("vignette-r3");
+    expect(card).toHaveTextContent("SD");
+    expect(card).toHaveTextContent("2/2 à trouver");
+    expect(card).toHaveTextContent("23/11/2026 → 27/11/2026 · 5 j");
+    expect(card).toHaveTextContent("À vérifier");
+    expect(card).toHaveTextContent("Modification en attente");
+    expect(card).toHaveTextContent("Manque : lieu");
+    expect(card).toHaveTextContent("Technicien absent");
+  });
+
+  it("ouvre la fiche détaillée et marque la demande comme vérifiée (F-14)", async () => {
+    const fetchMock = mockFetch({ "PATCH /api/requests/r3": { status: 200, body: {} } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(await screen.findByTestId("vignette-r3"));
+    const panel = await screen.findByRole("complementary", { name: "Fiche de la demande" });
+    expect((await within(panel).findByText(/Informations manquantes/)).closest("p")).toHaveTextContent("lieu");
+    expect(within(panel).getByRole("link", { name: "Salon" })).toHaveAttribute("href", "https://outlook.example.local/s1");
+    expect(panel).toHaveTextContent("confiance 82 %");
+    fireEvent.click(within(panel).getByRole("button", { name: /Marquer comme vérifiée/ }));
+    await screen.findByText("Demande marquée comme vérifiée.");
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ version: 4, needs_review: false });
+  });
+
+  it("n'envoie que les champs modifiés de la fiche", async () => {
+    const fetchMock = mockFetch({ "PATCH /api/requests/r3": { status: 200, body: {} } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(await screen.findByTestId("vignette-r3"));
+    const panel = await screen.findByRole("complementary", { name: "Fiche de la demande" });
+    fireEvent.change(await within(panel).findByLabelText(/^Lieu/), { target: { value: "Villepinte" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Enregistrer" }));
+    await screen.findByText("Demande enregistrée.");
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ version: 4, location: "Villepinte" });
+  });
+
+  it("crée une demande manuelle et valide les dates (F-12)", async () => {
+    const fetchMock = mockFetch({ "POST /api/requests": { status: 201, body: { id: "r9", ref: "D-2026-0009" } } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PlanningPage today="2026-11-04" />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Demande" }));
+    const dialog = screen.getByRole("dialog", { name: "Nouvelle demande" });
+    fireEvent.change(within(dialog).getByLabelText("Titre court"), { target: { value: "Formation tir" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Début/), { target: { value: "2026-12-10" } });
+    fireEvent.change(within(dialog).getByLabelText(/^Fin/), { target: { value: "2026-12-08" } });
+    expect(within(dialog).getByRole("button", { name: "Créer la demande" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/^Fin/), { target: { value: "2026-12-11" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "+ Ligne" }));
+    fireEvent.change(within(dialog).getByLabelText("Produit 1"), { target: { value: "Fusil X" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Créer la demande" }));
+    await screen.findByText("Demande D-2026-0009 créée.");
+    const post = fetchMock.mock.calls.find(([url, init]) => init?.method === "POST" && String(url) === "/api/requests");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      title: "Formation tir",
+      start_date: "2026-12-10",
+      end_date: "2026-12-11",
+      technicians_needed: 1,
+      products: [{ product: "Fusil X", ammunition: null, comment: null }],
+    });
+  });
+
+  it("replie la zone tampon", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<PlanningPage today="2026-11-04" />);
+    await screen.findByTestId("vignette-r3");
+    fireEvent.click(screen.getByRole("button", { name: "Replier la zone À attribuer" }));
+    expect(screen.getByRole("button", { name: "Afficher la zone À attribuer" })).toHaveTextContent("À attribuer (1)");
   });
 });

@@ -210,6 +210,10 @@ class Request(EntityMixin, Base):
     confidence: Mapped[float | None] = mapped_column(Float)
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     needed_by: Mapped[date | None] = mapped_column(Date)
+    # F-12 : pièces jointes limitées à un lien en V1
+    attachment_url: Mapped[str | None] = mapped_column(Text)
+    # F-15 : demande absorbée par une fusion (elle est alors annulée)
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("requests.id"))
 
 
 class Assignment(EntityMixin, Base):

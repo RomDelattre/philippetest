@@ -125,3 +125,90 @@ export interface Planning {
   absences: Absence[];
   holidays: Holiday[];
 }
+
+export type ChangeKind = "modification" | "cancellation";
+
+export interface Vignette {
+  id: string;
+  ref: string;
+  type_code: string | null;
+  title: string;
+  requester_name: string | null;
+  client: string | null;
+  cf: string | null;
+  location: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  technicians_needed: number;
+  remaining: number;
+  status: RequestStatus;
+  needs_review: boolean;
+  missing_fields: string[];
+  badges: string[];
+  pending_changes: ChangeKind[];
+  origin: "mail" | "teams" | "sharepoint" | "manual";
+  date_flexible: boolean;
+  version: number;
+}
+
+export interface ProductLine {
+  product: string;
+  ammunition: string | null;
+  comment: string | null;
+}
+
+/** Champs éditables d'une demande (F-12, F-14). */
+export interface RequestFields {
+  type_code: string | null;
+  title: string;
+  requester_name: string | null;
+  requester_email: string | null;
+  cf: string | null;
+  client: string | null;
+  location: string | null;
+  objective: string | null;
+  technicians_needed: number;
+  start_date: string | null;
+  end_date: string | null;
+  date_flexible: boolean;
+  flex_justification: string | null;
+  comments: string | null;
+  products: ProductLine[];
+  needed_by: string | null;
+  attachment_url: string | null;
+}
+
+export interface RequestDetail extends RequestFields {
+  id: string;
+  ref: string;
+  status: RequestStatus;
+  needs_review: boolean;
+  missing_fields: string[];
+  badges: string[];
+  origin: Vignette["origin"];
+  confidence: number | null;
+  requested_at: string | null;
+  cancelled_at: string | null;
+  merged_into_ref: string | null;
+  remaining: number;
+  version: number;
+  assignments: (Assignment & { technician_name: string; created_at: string })[];
+  sources: {
+    id: string;
+    source: "mail" | "teams" | "sharepoint";
+    received_at: string;
+    sender: string | null;
+    subject: string | null;
+    body_excerpt: string | null;
+    web_link: string | null;
+  }[];
+  pending_changes: { id: string; kind: ChangeKind; proposed_changes: Record<string, unknown>; created_at: string }[];
+  history: {
+    created_at: string;
+    actor: string;
+    action: string;
+    entity_type: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+  }[];
+}

@@ -22,6 +22,7 @@ export default function SidePanel(props: {
   mechanics: Technician[];
   onSave: (period: Period) => void;
   onClose: () => void;
+  onOpenRequest: (requestId: string) => void;
 }) {
   const { assignment: a, request: r } = props;
   const [form, setForm] = useState<Period>({ technicianId: a.technician_id, start: a.start_date, end: a.end_date });
@@ -69,6 +70,9 @@ export default function SidePanel(props: {
               </div>
             ))}
         </dl>
+        <button type="button" className={secondaryBtn} onClick={() => props.onOpenRequest(a.request_id)}>
+          Ouvrir la fiche de la demande
+        </button>
 
         <form
           className="space-y-2 rounded border border-slate-200 p-2"
